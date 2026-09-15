@@ -124,8 +124,9 @@ fn length_bound_exceeds_euclidean_lower_bound(params: &SisParameters, d: u64, lo
 mod tests {
     use crate::{
         config::Adps16Mode,
-        params::{akita_q32, Bound, SisNorm},
-        EstimateConfig,
+        cost_euclidean as public_cost_euclidean, estimate,
+        params::{akita_q128, akita_q32, akita_q64, Bound, SisNorm},
+        EstimateConfig, EstimatorError,
     };
 
     use super::*;
@@ -243,5 +244,106 @@ mod tests {
         assert!(length_bound_trivially_easy(&params(Bound::Float(
             4_294_967_197.0
         ))));
+    }
+
+    #[test]
+    fn euclidean_public_entry_points_enforce_the_q_boundary() {
+        let config = EstimateConfig {
+            red_cost_model: ReductionCostModel::Adps16 {
+                mode: Adps16Mode::Quantum,
+            },
+            ..EstimateConfig::default()
+        };
+        let finite = SisParameters::try_new(
+            1_024,
+            BigUint::from(12_289u32),
+            Some(27_824),
+            Bound::Float(8_382.44),
+            SisNorm::Euclidean,
+        )
+        .unwrap();
+        for cost in [
+            estimate(&finite, &config).unwrap(),
+            public_cost_euclidean(&finite, &config).unwrap(),
+        ] {
+            assert_eq!(cost.beta, Some(953));
+            assert_eq!(cost.d, 2_134);
+            assert!(matches!(cost.rop, CostValue::Finite(_)));
+        }
+
+        let q = finite.q.clone();
+        for bound in [
+            Bound::Integer(q.clone()),
+            Bound::Integer(&q + BigUint::from(1u8)),
+        ] {
+            let params =
+                SisParameters::try_new(finite.n, q.clone(), finite.m, bound, SisNorm::Euclidean)
+                    .unwrap();
+            for error in [
+                estimate(&params, &config).unwrap_err(),
+                public_cost_euclidean(&params, &config).unwrap_err(),
+            ] {
+                assert!(matches!(
+                    error,
+                    EstimatorError::InvalidParameter {
+                        field: "length_bound",
+                        ..
+                    }
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn euclidean_float_boundary_does_not_round_the_modulus() {
+        let q32 = akita_q32();
+        let q32_f64: f64 = 4_294_967_197.0;
+        let params = |q, length_bound| {
+            SisParameters::try_new(32, q, Some(128), length_bound, SisNorm::Euclidean).unwrap()
+        };
+        assert!(!length_bound_trivially_easy(&params(
+            q32.clone(),
+            Bound::Float(q32_f64.next_down())
+        )));
+        assert!(length_bound_trivially_easy(&params(
+            q32.clone(),
+            Bound::Float(q32_f64)
+        )));
+        assert!(length_bound_trivially_easy(&params(
+            q32,
+            Bound::Float(q32_f64.next_up())
+        )));
+
+        let q_over_f64_precision = (BigUint::from(1u8) << 53usize) + BigUint::from(1u8);
+        assert!(!length_bound_trivially_easy(&params(
+            q_over_f64_precision.clone(),
+            Bound::Float(9_007_199_254_740_992.0)
+        )));
+        assert!(length_bound_trivially_easy(&params(
+            q_over_f64_precision,
+            Bound::Float(9_007_199_254_740_994.0)
+        )));
+    }
+
+    #[test]
+    fn euclidean_exact_boundary_covers_large_akita_moduli() {
+        for q in [akita_q64(), akita_q128()] {
+            let params = |length_bound| {
+                SisParameters::try_new(32, q.clone(), Some(128), length_bound, SisNorm::Euclidean)
+                    .unwrap()
+            };
+            assert!(!length_bound_trivially_easy(&params(Bound::Integer(
+                &q - BigUint::from(1u8)
+            ))));
+            assert!(length_bound_trivially_easy(&params(Bound::Integer(
+                q.clone()
+            ))));
+            assert!(!length_bound_trivially_easy(&params(Bound::SqrtInteger(
+                &q * &q - BigUint::from(1u8)
+            ))));
+            assert!(length_bound_trivially_easy(&params(Bound::SqrtInteger(
+                &q * &q
+            ))));
+        }
     }
 }
