@@ -1,7 +1,8 @@
 use super::*;
 use crate::backend::{RecursiveFoldSource, RecursiveWitnessFlat};
 use crate::commitment::{
-    CommitmentStatePolicy, InnerRelationState, OuterCompressionState, TerminalBindingState,
+    CommitmentExecutionPlan, CommitmentStatePolicy, InnerRelationState, OuterCompressionState,
+    TerminalTFieldsMessage,
 };
 use crate::compute::{
     ComputeBackendSetup, DigitRowsComputeBackend, LevelProveStacks, ProverComputeStack,
@@ -23,6 +24,8 @@ pub struct SuffixProverState<F: Field, E: Field, S = AkitaCommitmentHint<F>> {
     pub binding: NextWitnessState<F>,
     /// Persistent semantic A-ring rows for the current suffix commitment.
     pub prover_state: S,
+    pub(crate) inner_relation_material: crate::commitment::InnerRelationStateMaterial<F>,
+    pub(crate) compression_material: Option<crate::commitment::PortableCompressionState<F>>,
     /// Current digit basis, as `log2(b)`.
     pub log_basis: u32,
     /// Sumcheck challenges that become the next suffix opening point.
@@ -41,175 +44,175 @@ impl<F: Field, E: Field, S> SuffixProverState<F, E, S> {
     }
 }
 
-/// Drive the recursive fold suffix (after the root) under config `Cfg`.
-///
-/// The selected planner `schedule` is authoritative: it determines the fold
-/// count, per-level `CommittedGroupParams`, successor params, and the terminal direct
-/// witness basis. Earlier suffix levels run intermediate folds; the last
-/// suffix level runs the terminal fold which ships the cleartext
-/// `terminal_response`.
-///
-/// # Errors
-///
-/// Returns an error if level proving fails or the required recursive suffix is
-/// absent.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn prove_suffix<'stack, Cfg, T, O, TS, R, SP>(
-    expanded: &Arc<AkitaExpandedSetup<Cfg::Field>>,
-    prefix_slots: &SetupPrefixProverRegistry<Cfg::Field>,
-    stacks: &'stack impl LevelProveStacks<
-        'stack,
-        Cfg::Field,
-        Opening = O,
-        Tensor = TS,
-        RingSwitch = R,
-        CommitmentStatePolicy = SP,
-    >,
-    transcript: &mut T,
-    starting_state: SuffixProverState<Cfg::Field, Cfg::ExtField, SP::State>,
-    schedule: &FoldSchedule,
-) -> Result<RecursiveSuffixOutcome<Cfg::Field, Cfg::ExtField>, AkitaError>
-where
-    Cfg: CommitmentConfig,
-    Cfg::Field: Field
-        + CanonicalEncoding
-        + akita_serialization::AkitaSerialize
-        + Field
-        + Unreduced
-        + Field
-        + Field
-        + PseudoMersenne
-        + Ring
-        + 'static,
-    <Cfg::Field as Unreduced>::Wide: From<Cfg::Field> + AdditiveGroup,
-    Cfg::ExtField: FpExtEncoding<Cfg::Field>
-        + ExtField<Cfg::Field>
-        + Unreduced
-        + Fold
-        + Ring
-        + AkitaSerialize
-        + MulBaseUnreduced<Cfg::Field>,
-    T: akita_types::ProverTranscriptGrinding<Cfg::Field>,
-    SP: CommitmentStatePolicy<Cfg::Field> + 'stack,
-    SP::State: InnerRelationState<Cfg::Field>
-        + OuterCompressionState<Cfg::Field>
-        + TerminalBindingState<Cfg::Field>,
-    O: SuffixOpeningProveBackend<Cfg::Field>
-        + RuntimeOpeningProveBackendFor<Cfg::Field, RecursiveFoldSource<Cfg::Field>>
-        + RuntimeCoefficientPackingBackendFor<
+impl<'stack, Stacks: ?Sized> ProverExecutor<'stack, Stacks> {
+    /// Drive the recursive fold suffix (after the root) under config `Cfg`.
+    ///
+    /// The selected planner `schedule` is authoritative: it determines the fold
+    /// count, per-level `CommittedGroupParams`, successor params, and the terminal
+    /// direct witness basis. Earlier suffix levels run intermediate folds; the last
+    /// suffix level runs the terminal fold which ships the cleartext response.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if level proving fails or the required recursive suffix is
+    /// absent.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn prove_suffix<Cfg, T, O, TS, R, SP>(
+        &self,
+        expanded: &Arc<AkitaExpandedSetup<Cfg::Field>>,
+        prefix_slots: &SetupPrefixProverRegistry<Cfg::Field>,
+        transcript: &mut T,
+        starting_state: SuffixProverState<Cfg::Field, Cfg::ExtField, SP::State>,
+        schedule: &FoldSchedule,
+    ) -> Result<RecursiveSuffixOutcome<Cfg::Field, Cfg::ExtField>, AkitaError>
+    where
+        Cfg: CommitmentConfig,
+        Cfg::Field: Field
+            + CanonicalEncoding
+            + akita_serialization::AkitaSerialize
+            + Field
+            + Unreduced
+            + Field
+            + Field
+            + PseudoMersenne
+            + Ring
+            + 'static,
+        <Cfg::Field as Unreduced>::Wide: From<Cfg::Field> + AdditiveGroup,
+        Cfg::ExtField: FpExtEncoding<Cfg::Field>
+            + ExtField<Cfg::Field>
+            + Unreduced
+            + Fold
+            + Ring
+            + AkitaSerialize
+            + MulBaseUnreduced<Cfg::Field>,
+        T: akita_types::ProverTranscriptGrinding<Cfg::Field>,
+        SP: CommitmentStatePolicy<Cfg::Field> + 'stack,
+        SP::State: InnerRelationState<Cfg::Field> + OuterCompressionState<Cfg::Field>,
+        O: SuffixOpeningProveBackend<Cfg::Field>
+            + RuntimeOpeningProveBackendFor<Cfg::Field, RecursiveFoldSource<Cfg::Field>>
+            + RuntimeCoefficientPackingBackendFor<
+                Cfg::Field,
+                RecursiveFoldSource<Cfg::Field>,
+                Cfg::ExtField,
+            > + DigitRowsComputeBackend<Cfg::Field>
+            + ComputeBackendSetup<Cfg::Field>
+            + 'stack,
+        TS: SuffixTensorProveBackend<Cfg::Field, Cfg::ExtField>
+            + RuntimeTensorBackendFor<Cfg::Field, RecursiveFoldSource<Cfg::Field>, Cfg::ExtField>
+            + ComputeBackendSetup<Cfg::Field>
+            + 'stack,
+        R: RuntimeRingSwitchProveBackend<Cfg::Field>
+            + DigitRowsComputeBackend<Cfg::Field>
+            + ComputeBackendSetup<Cfg::Field>
+            + 'stack,
+        <O as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'stack,
+        <TS as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'stack,
+        <R as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'stack,
+        Stacks: LevelProveStacks<
+            'stack,
             Cfg::Field,
-            RecursiveFoldSource<Cfg::Field>,
-            Cfg::ExtField,
-        > + DigitRowsComputeBackend<Cfg::Field>
-        + ComputeBackendSetup<Cfg::Field>
-        + 'stack,
-    TS: SuffixTensorProveBackend<Cfg::Field, Cfg::ExtField>
-        + RuntimeTensorBackendFor<Cfg::Field, RecursiveFoldSource<Cfg::Field>, Cfg::ExtField>
-        + ComputeBackendSetup<Cfg::Field>
-        + 'stack,
-    R: RuntimeRingSwitchProveBackend<Cfg::Field>
-        + DigitRowsComputeBackend<Cfg::Field>
-        + ComputeBackendSetup<Cfg::Field>
-        + 'stack,
-    <O as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'stack,
-    <TS as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'stack,
-    <R as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'stack,
-{
-    let planned_num_levels = schedule.num_fold_levels();
-    if planned_num_levels < 2 {
-        return Err(AkitaError::InvalidSetup(
-            "prove_suffix expects a non-empty recursive suffix".to_string(),
-        ));
-    }
-    let mut intermediate_levels = Vec::new();
-    let mut current_state = starting_state;
-    let mut level = 1usize;
+            Opening = O,
+            Tensor = TS,
+            RingSwitch = R,
+            CommitmentStatePolicy = SP,
+        >,
+    {
+        let planned_num_levels = schedule.num_fold_levels();
+        if planned_num_levels < 2 {
+            return Err(AkitaError::InvalidSetup(
+                "prove_suffix expects a non-empty recursive suffix".to_string(),
+            ));
+        }
+        let mut intermediate_levels = Vec::new();
+        let mut current_state = starting_state;
+        let mut level = 1usize;
 
-    for (recursive_index, step) in schedule.recursive_folds.iter().enumerate() {
-        let level_params = &step.params;
-        let input_witness_len = step.input_witness_len;
-        let successor = schedule.recursive_folds.get(recursive_index + 1);
-        let (next_params, next_binding) = successor.map_or(
-            (
-                super::fold::FoldSuccessorParams::Terminal(&schedule.terminal),
-                akita_types::NextWitnessBindingPolicy::TerminalInnerState,
-            ),
-            |next| {
+        for (recursive_index, step) in schedule.recursive_folds.iter().enumerate() {
+            let level_params = &step.params;
+            let input_witness_len = step.input_witness_len;
+            let successor = schedule.recursive_folds.get(recursive_index + 1);
+            let (next_params, next_binding) = successor.map_or(
                 (
-                    super::fold::FoldSuccessorParams::Recursive(next),
-                    akita_types::NextWitnessBindingPolicy::OuterPayload,
-                )
-            },
-        );
-        let current_witness_len = current_state.w.live_coeff_len();
-        if current_witness_len != input_witness_len {
-            return Err(AkitaError::InvalidSetup(format!(
+                    super::fold::FoldSuccessorParams::Terminal(&schedule.terminal),
+                    akita_types::NextWitnessBindingPolicy::TerminalInnerState,
+                ),
+                |next| {
+                    (
+                        super::fold::FoldSuccessorParams::Recursive(next),
+                        akita_types::NextWitnessBindingPolicy::OuterPayload,
+                    )
+                },
+            );
+            let current_witness_len = current_state.w.live_coeff_len();
+            if current_witness_len != input_witness_len {
+                return Err(AkitaError::InvalidSetup(format!(
                 "scheduled fold level {level} did not match runtime state: expected_witness_len={input_witness_len}, actual_witness_len={}",
                 current_witness_len
             )));
-        }
-        let role_dims = level_params.role_dims();
-        let prepared_fold = {
-            let stack = stacks.prove_stack_at_level(level);
-            prepare_suffix::<Cfg::Field, Cfg::ExtField, T, O, TS, R, SP, _>(
-                stack,
+            }
+            let role_dims = level_params.role_dims();
+            let prepared_fold = {
+                let stack = self.stacks.prove_stack_at_level(level);
+                prepare_suffix::<Cfg::Field, Cfg::ExtField, T, O, TS, R, SP, _>(
+                    stack,
+                    expanded,
+                    prefix_slots,
+                    transcript,
+                    current_state,
+                    level,
+                    level_params,
+                )
+                .map_err(|err| {
+                    AkitaError::InvalidInput(format!(
+                        "suffix prepare level {level} d_a={} failed: {err:?}",
+                        role_dims.d_a()
+                    ))
+                })?
+            };
+            let out = super::fold::prove_fold::<Cfg::Field, Cfg::ExtField, T, O, TS, R, SP, Cfg>(
                 expanded,
                 prefix_slots,
+                self.stacks.prove_stack_at_level(level),
                 transcript,
-                current_state,
                 level,
                 level_params,
+                next_params,
+                step.output_witness_len,
+                next_binding,
+                prepared_fold,
             )
             .map_err(|err| {
                 AkitaError::InvalidInput(format!(
-                    "suffix prepare level {level} d_a={} failed: {err:?}",
+                    "suffix fold level {level} d_a={} failed: {err:?}",
                     role_dims.d_a()
                 ))
-            })?
-        };
-        let out = super::fold::prove_fold::<Cfg::Field, Cfg::ExtField, T, O, TS, R, SP, Cfg>(
-            expanded,
-            prefix_slots,
-            stacks.prove_stack_at_level(level),
-            transcript,
-            level,
-            level_params,
-            Some(next_params),
-            Some(step.output_witness_len),
-            Some(next_binding),
-            prepared_fold,
-        )
-        .map_err(|err| {
-            AkitaError::InvalidInput(format!(
-                "suffix fold level {level} d_a={} failed: {err:?}",
-                role_dims.d_a()
-            ))
-        })?;
-        intermediate_levels.push(out.level_proof);
-        current_state = out.next_state;
-        level += 1;
-    }
-    let current_witness_len = current_state.w.live_coeff_len();
-    if current_witness_len != schedule.terminal.input_witness_len {
-        return Err(AkitaError::InvalidSetup(format!(
+            })?;
+            intermediate_levels.push(out.level_proof);
+            current_state = out.next_state;
+            level += 1;
+        }
+        let current_witness_len = current_state.w.live_coeff_len();
+        if current_witness_len != schedule.terminal.input_witness_len {
+            return Err(AkitaError::InvalidSetup(format!(
             "scheduled terminal fold did not match runtime state: expected_witness_len={}, actual_witness_len={}",
             schedule.terminal.input_witness_len,
             current_witness_len,
         )));
-    }
-    let terminal = prove_terminal_suffix::<Cfg::Field, Cfg::ExtField, T, O, TS, R, SP, _>(
-        stacks.prove_stack_at_level(level),
-        transcript,
-        level,
-        current_state,
-        &schedule.terminal,
-    )?;
+        }
+        let terminal = prove_terminal_suffix::<Cfg::Field, Cfg::ExtField, T, O, TS, R, SP, _>(
+            self.stacks.prove_stack_at_level(level),
+            transcript,
+            level,
+            current_state,
+            &schedule.terminal,
+        )?;
 
-    Ok(RecursiveSuffixOutcome {
-        recursive_folds: intermediate_levels,
-        terminal,
-        num_levels: planned_num_levels,
-    })
+        Ok(RecursiveSuffixOutcome {
+            recursive_folds: intermediate_levels,
+            terminal,
+            num_levels: planned_num_levels,
+        })
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -246,13 +249,15 @@ where
         + ComputeBackendSetup<F>,
     R: ComputeBackendSetup<F>,
     SP: CommitmentStatePolicy<F>,
-    S: InnerRelationState<F> + TerminalBindingState<F>,
+    S: InnerRelationState<F>,
 {
     let SuffixProverState {
         w,
         logical_w,
         binding,
         prover_state,
+        inner_relation_material,
+        compression_material,
         sumcheck_challenges,
         opening,
         setup_prefix_opening,
@@ -267,9 +272,21 @@ where
         NextWitnessState::TerminalInnerState => {}
         NextWitnessState::OuterPayload(_) => return Err(AkitaError::InvalidProof),
     }
-    let terminal_message = prover_state.terminal_t_fields_message()?;
+    let terminal_plan = CommitmentExecutionPlan::for_terminal(scheduled, level)?;
+    inner_relation_material.validate(terminal_plan.inner(), 1)?;
+    if compression_material.is_some() {
+        return Err(AkitaError::InvalidInput(
+            "terminal commitment state unexpectedly retained compression material".into(),
+        ));
+    }
+    let terminal_material = inner_relation_material;
+    let [terminal_row] = terminal_material.rows() else {
+        return Err(AkitaError::InvalidProof);
+    };
+    let terminal_message = TerminalTFieldsMessage::from_row(terminal_row)?;
     transcript.absorb_and_record_bytes(ABSORB_COMMITMENT, terminal_message.as_bytes());
-    let mut terminal_rows = prover_state.inner_relation_material()?.into_rows();
+    drop(prover_state);
+    let mut terminal_rows = terminal_material.into_rows();
     if terminal_rows.len() != 1 {
         return Err(AkitaError::InvalidProof);
     }
@@ -460,6 +477,8 @@ where
         logical_w: optional_logical_w,
         binding,
         prover_state,
+        inner_relation_material,
+        compression_material,
         sumcheck_challenges,
         opening,
         setup_prefix_opening,
@@ -479,11 +498,6 @@ where
                     payload_geometry.transmitted_coefficients(),
                 )));
             }
-            commitment.append_flat_to_transcript::<T>(
-                ABSORB_COMMITMENT,
-                payload_geometry.transcript_ring_dimension(),
-                transcript,
-            )?;
             commitment
         }
         NextWitnessState::TerminalInnerState => return Err(AkitaError::InvalidProof),
@@ -521,6 +535,31 @@ where
         &witness_polys[..],
         (Commitment::new(witness_commitment), prover_state),
     )?;
+    let witness_group_index = block_claims
+        .opening_claims()
+        .num_groups()
+        .checked_sub(1)
+        .ok_or_else(|| AkitaError::InvalidInput("suffix opening has no witness group".into()))?;
+    let commitment_material = block_claims.prepare_commitment_relation_material(
+        level_params,
+        E::DEGREE,
+        Some((
+            witness_group_index,
+            crate::types::PreparedCommitmentRelationMaterial {
+                inner: inner_relation_material,
+                compression: compression_material,
+            },
+        )),
+    )?;
+    block_claims
+        .opening_claims()
+        .group_commitment(witness_group_index)?
+        .rows()
+        .append_flat_to_transcript::<T>(
+            ABSORB_COMMITMENT,
+            payload_geometry.transcript_ring_dimension(),
+            transcript,
+        )?;
     let opening_method = level_params.opening_method();
     let needs_extension_reduction = opening_method.requires_extension_opening_reduction(E::DEGREE);
     let logical_polys = setup_source_storage
@@ -536,6 +575,7 @@ where
         prepare_single_field_fold::<F, E, T, _, _, O, TS, R, SP>(
             stack,
             block_claims,
+            commitment_material,
             true,
             transcript,
             u32::try_from(level)
@@ -548,6 +588,7 @@ where
             stack,
             needs_extension_reduction,
             block_claims,
+            commitment_material,
             ExtensionOpeningSource::Logical(&logical_groups),
             true,
             transcript,

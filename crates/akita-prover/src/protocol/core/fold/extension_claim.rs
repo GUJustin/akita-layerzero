@@ -1,5 +1,5 @@
 use super::super::*;
-use super::{finish_prepared_fold, FinishFoldArgs, PreparedFold};
+use super::{prepare_fold_relation, PreparedFold};
 use crate::commitment::{CommitmentStatePolicy, InnerRelationState, OuterCompressionState};
 use crate::compute::{
     ComputeBackendSetup, DigitRowsComputeBackend, ProverComputeStack, RuntimeRingSwitchProveBackend,
@@ -17,6 +17,7 @@ pub(in crate::protocol::core) fn prepare_extension_claim_fold<'a, F, E, T, P, S,
     stack: &ProverComputeStack<'_, F, O, TS, R, SP>,
     run_eor: bool,
     block_claims: ProverOpeningData<'a, E, P, F, S>,
+    commitment_material: Vec<crate::types::PreparedCommitmentRelationMaterial<F>>,
     eor_source: ExtensionOpeningSource<'_, P>,
     pad_base_evals: bool,
     transcript: &mut T,
@@ -100,17 +101,18 @@ where
         (protocol_points, None)
     };
 
-    finish_prepared_fold::<F, E, T, P, S, O, TS, R, SP>(FinishFoldArgs {
+    prepare_fold_relation::<F, E, T, P, S, O, TS, R, SP>(
         stack,
         block_claims,
-        protocol_points: &protocol_points,
+        commitment_material,
+        &protocol_points,
         reduction,
-        trace_opening_batch: &opening_batch,
+        &opening_batch,
         level,
         level_params,
         basis,
         pad_base_evals,
         transcript,
-    })
+    )
     .map_err(|err| AkitaError::InvalidInput(format!("finish prepared fold failed: {err:?}")))
 }
