@@ -39,7 +39,6 @@ fn assert_retained_sweeps_match<const D: usize>(seed: u64) {
         n_a,
         active_a_cols,
         1,
-        Some(CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER),
         OneHotSweep::Bucketed,
     )
     .unwrap();
@@ -49,7 +48,6 @@ fn assert_retained_sweeps_match<const D: usize>(seed: u64) {
         n_a,
         active_a_cols,
         1,
-        Some(CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER),
         OneHotSweep::Merge,
     )
     .unwrap();
@@ -65,74 +63,7 @@ fn retained_sweeps_match_across_polys_and_dimensions() {
 }
 
 #[test]
-fn configured_scratch_budget_preserves_onehot_commit_arithmetic() {
-    use crate::compute::{CommitInnerPlan, ComputeBackendSetup};
-    use crate::AkitaProverSetup;
-    use akita_types::SetupMatrixCapacity;
-
-    type F = Prime128Offset275;
-    const D: usize = 64;
-    const K: usize = 64;
-
-    let poly = OneHotPoly::<F, u8>::new(
-        K,
-        (0usize..256)
-            .map(|chunk| (!chunk.is_multiple_of(5)).then_some((chunk % K) as u8))
-            .collect(),
-    )
-    .unwrap();
-    let plan = CommitInnerPlan {
-        ring_dimension: D,
-        num_live_blocks: 1,
-        n_a: 2,
-        num_positions_per_block: 16,
-        num_digits_inner: 1,
-        log_basis_inner: 1,
-    };
-    let setup = AkitaProverSetup::<F>::generate_with_capacity(
-        8,
-        1,
-        SetupMatrixCapacity {
-            num_field_elements: plan.n_a * plan.num_positions_per_block * D,
-        },
-    )
-    .unwrap();
-    let default_backend = CpuBackend::DEFAULT;
-    let prepared = default_backend.prepare_setup(&setup).unwrap();
-    let default = commit_onehot_sources::<F, D, u8>(
-        &default_backend,
-        &prepared,
-        &[poly.commitment_source()],
-        plan,
-    )
-    .unwrap();
-    let constrained_backend = CpuBackend::with_resource_limits(usize::MAX, 1 << 20).unwrap();
-    let constrained = commit_onehot_sources::<F, D, u8>(
-        &constrained_backend,
-        &prepared,
-        &[poly.commitment_source()],
-        plan,
-    )
-    .unwrap();
-    assert_eq!(constrained.len(), default.len());
-    for (constrained, default) in constrained.iter().zip(&default) {
-        assert_eq!(constrained.inner_rows.coeffs(), default.inner_rows.coeffs());
-    }
-
-    let too_small_backend = CpuBackend::with_resource_limits(usize::MAX, 1).unwrap();
-    assert!(matches!(
-        commit_onehot_sources::<F, D, u8>(
-            &too_small_backend,
-            &prepared,
-            &[poly.commitment_source()],
-            plan,
-        ),
-        Err(AkitaError::InvalidSetup(_))
-    ));
-}
-
-#[test]
-fn automatic_scratch_fits_large_blocks_and_preserves_explicit_caps() {
+fn automatic_scratch_fits_large_blocks() {
     use crate::compute::{CommitInnerPlan, ComputeBackendSetup};
     use crate::AkitaProverSetup;
     use akita_types::SetupMatrixCapacity;
@@ -164,16 +95,6 @@ fn automatic_scratch_fits_large_blocks_and_preserves_explicit_caps() {
     let backend = CpuBackend::DEFAULT;
     let prepared = backend.prepare_setup(&setup).unwrap();
     let sources = [poly.commitment_source()];
-    let capped = CpuBackend::with_resource_limits(
-        CpuBackend::DEFAULT_MAX_CACHED_RING_SWITCH_ELEMENTS,
-        CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER,
-    )
-    .unwrap();
-    assert!(matches!(
-        commit_onehot_sources::<F, D, u8>(&capped, &prepared, &sources, plan),
-        Err(AkitaError::InvalidSetup(_))
-    ));
-
     let witnesses = commit_onehot_sources::<F, D, u8>(&backend, &prepared, &sources, plan).unwrap();
     let matrix = setup
         .expanded
@@ -318,16 +239,8 @@ where
     for _ in 0..5 {
         let start = Instant::now();
         std::hint::black_box(
-            column_sweep_ajtai_onehot_multi_forced(
-                a_view,
-                sources,
-                n_a,
-                active_a_cols,
-                1,
-                Some(CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER),
-                sweep,
-            )
-            .unwrap(),
+            column_sweep_ajtai_onehot_multi_forced(a_view, sources, n_a, active_a_cols, 1, sweep)
+                .unwrap(),
         );
         samples.push(start.elapsed());
     }

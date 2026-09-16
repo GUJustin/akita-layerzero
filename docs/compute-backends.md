@@ -45,23 +45,18 @@ let commit_output = scheme.commit(
 )?;
 ```
 
-The default CPU backend sizes one-hot commitment scratch automatically from
-the kernel's geometry, targeting 8 MiB per worker and raising that target to
-fit at least one block. See the [CPU resource policy](../book/src/how/optimizations.md#cpu-resource-limits).
+The CPU kernel sizes one-hot commitment scratch automatically from the
+commitment geometry. Scratch sizing is an internal implementation detail;
+see the [CPU resource policy](../book/src/how/optimizations.md#cpu-resource-limits).
 
-Applications may replace the default with
-`CpuBackend::with_resource_limits(max_cached_ring_switch_elements,
-commit_scratch_bytes_per_worker)`. A zero ring switch limit streams every
-operation that has a streamed path. `usize::MAX` retains every supported ring
-switch operation. The constructor rejects a zero commitment scratch budget.
-The one-hot commitment kernel rejects the operation later if its minimum tile
-does not fit the explicit cap. `commit_scratch_bytes_per_worker()` returns
-`None` for automatic sizing and `Some(bytes)` for an explicit cap.
-These settings change memory use and CPU work. Cached and streamed
-ring-switch routes use the same validated quotient arithmetic, including the
-same exact field fallback when one centered term is unsafe in CRT form. The
-settings do not change the schedule, transcript, setup bytes, proof bytes, or
-verifier.
+Applications may configure ring-switch cache retention with
+`CpuBackend::with_ring_switch_cache_limit(max_cached_ring_switch_elements)`.
+A zero limit streams every operation that has a streamed path. `usize::MAX`
+retains every supported ring switch operation. This setting changes memory
+use and CPU work. Cached and streamed ring-switch routes use the same
+validated quotient arithmetic, including the same exact field fallback when
+one centered term is unsafe in CRT form. The setting does not change the
+schedule, transcript, setup bytes, proof bytes, or verifier.
 
 Ring dimension enters only at kernel boundaries through schedule-derived dispatch,
 not as a type parameter on the PCS API.

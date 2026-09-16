@@ -27,55 +27,34 @@ pub use prepared::{CpuPreparedSetup, PreparedCrtNttProfile, PreparedNttCacheMetr
 
 /// CPU backend using the existing Rust/Rayon kernels.
 ///
-/// These deployment resource limits choose equivalent execution paths. They
-/// do not affect protocol parameters or proof bytes.
+/// The ring-switch cache limit chooses equivalent execution paths without
+/// affecting protocol parameters or proof bytes. Commitment scratch is sized
+/// automatically for each operation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct CpuBackend {
     max_cached_ring_switch_elements: usize,
-    commit_scratch_bytes_per_worker: Option<usize>,
 }
 
 impl CpuBackend {
     /// Default maximum cached extent for a ring-switch NTT operation.
     pub const DEFAULT_MAX_CACHED_RING_SWITCH_ELEMENTS: usize = 1 << 21;
 
-    /// Target temporary sparse commitment memory per worker in automatic mode.
-    /// The kernel raises this target when its minimum tile needs more scratch.
-    pub const DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER: usize = 8 << 20;
-
-    /// CPU backend with the default ring-switch limit and automatic commitment scratch sizing.
+    /// CPU backend with the default ring-switch cache limit.
     pub const DEFAULT: Self = Self {
         max_cached_ring_switch_elements: Self::DEFAULT_MAX_CACHED_RING_SWITCH_ELEMENTS,
-        commit_scratch_bytes_per_worker: None,
     };
 
-    /// Create a CPU backend with explicit resource limits.
-    /// The commitment scratch cap is never raised to fit a kernel's minimum tile.
-    pub fn with_resource_limits(
-        max_cached_ring_switch_elements: usize,
-        commit_scratch_bytes_per_worker: usize,
-    ) -> Result<Self, akita_error::AkitaError> {
-        if commit_scratch_bytes_per_worker == 0 {
-            return Err(akita_error::AkitaError::InvalidSetup(
-                "CPU commitment scratch bytes per worker must be nonzero".into(),
-            ));
-        }
-        Ok(Self {
+    /// Create a CPU backend with a ring-switch cache limit.
+    /// Zero streams every supported operation; `usize::MAX` retains all of them.
+    pub const fn with_ring_switch_cache_limit(max_cached_ring_switch_elements: usize) -> Self {
+        Self {
             max_cached_ring_switch_elements,
-            commit_scratch_bytes_per_worker: Some(commit_scratch_bytes_per_worker),
-        })
+        }
     }
 
     /// Largest ring-switch operation extent retained as an NTT cache.
     pub const fn max_cached_ring_switch_elements(&self) -> usize {
         self.max_cached_ring_switch_elements
-    }
-
-    /// Explicit temporary sparse commitment cap per worker, or `None` for automatic sizing.
-    /// Automatic sizing uses at least [`Self::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER`]
-    /// and grows to accommodate one block for the commitment's geometry.
-    pub const fn commit_scratch_bytes_per_worker(&self) -> Option<usize> {
-        self.commit_scratch_bytes_per_worker
     }
 
     #[inline]

@@ -108,10 +108,10 @@ The implementation and its comparison with a padded-table reference are in
 
 Tile size and arithmetic traversal solve different problems.
 
-The tile size bounds temporary memory. The default CPU backend targets 8 MiB
-of one-hot commitment scratch per worker, raising that target to the estimated
-minimum needed for one block when the commitment geometry requires more.
-An application may instead choose an explicit nonzero cap.
+The tile size bounds temporary memory. The CPU kernel computes its scratch
+budget internally as the larger of a private 8 MiB batching target and the
+estimated minimum needed for one block. The target lets small blocks share a
+matrix pass; using only the minimum would force one block per tile.
 The estimate includes sparse entries, sweep indexes, wide accumulators,
 reduced rows, and small offset arrays. In simplified form,
 
@@ -139,25 +139,18 @@ a route change is visible even when total runtime is noisy.
 
 ## CPU resource limits
 
-`CpuBackend` owns two deployment policies. The first is the largest ring switch
-operation that keeps a complete transformed matrix prefix. The second is the
-one-hot commitment scratch budget for each worker. `CpuBackend::DEFAULT` uses
-`2^21` ring elements and automatic scratch sizing: the larger of 8 MiB and the
-kernel's checked minimum tile estimate. This allows large blocks without
-manual configuration. Scratch is per worker and excludes the prover's other
+`CpuBackend::with_ring_switch_cache_limit(max_cached_ring_switch_elements)`
+sets the largest ring switch operation that keeps a complete transformed
+matrix prefix. `CpuBackend::DEFAULT` uses `2^21` ring elements. A zero limit
+streams every ring switch operation that has a streamed implementation.
+`usize::MAX` retains every supported operation.
+
+Commitment scratch sizing and sweep selection are internal kernel decisions,
+as described above. Scratch is per worker and excludes the prover's other
 resident data, so automatic sizing does not impose a total memory limit.
 
-A zero ring switch limit streams every ring switch operation that has a
-streamed implementation. `usize::MAX` retains every supported operation.
-`CpuBackend::with_resource_limits` sets an explicit, nonzero commitment scratch
-cap. The kernel returns `InvalidSetup` before its tile allocation if even one
-block cannot fit; explicit caps are never raised automatically.
-`CpuBackend::commit_scratch_bytes_per_worker` returns `None` for automatic
-sizing and `Some(bytes)` for an explicit cap.
-
-These limits choose equivalent CPU execution paths. They do not change the
+These policies choose equivalent CPU execution paths. They do not change the
 proof schedule, transcript, setup bytes, proof bytes, or verifier behavior.
-The CPU backend still selects the private one hot arithmetic sweep.
 
 ## Wide accumulation
 
