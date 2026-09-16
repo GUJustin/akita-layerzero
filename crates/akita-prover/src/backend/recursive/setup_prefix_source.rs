@@ -15,12 +15,12 @@ use crate::backend::poly_helpers::{
     balanced_ring_decompose_fold_partitioned, build_decompose_fold_witness, DecomposeParams,
 };
 use crate::backend::{RecursiveWitnessFlat, SuffixWitnessView};
+use crate::compute::aggregate_decompose_fold_witnesses;
 use crate::compute::{
-    BatchDecomposeFoldOutcome, CpuBackend, DecomposeFoldBatchPlan, DecomposeFoldPlan,
-    OpeningBatchKernel, OpeningFoldKernel, OpeningFoldOutput, OpeningFoldPlan, RootOpeningSource,
-    RootPolyMeta, RootPolyShape, RootTensorSource, SubringCoefficientPackingBatchKernel,
-    SubringCoefficientPackingPartials, SubringCoefficientPackingPlan, TensorProjectionBatchKernel,
-    TensorProjectionKernel,
+    CpuBackend, DecomposeFoldBatchPlan, DecomposeFoldPlan, OpeningBatchKernel, OpeningFoldKernel,
+    OpeningFoldOutput, OpeningFoldPlan, RootOpeningSource, RootPolyMeta, RootPolyShape,
+    RootTensorSource, SubringCoefficientPackingBatchKernel, SubringCoefficientPackingPartials,
+    SubringCoefficientPackingPlan, TensorProjectionBatchKernel, TensorProjectionKernel,
 };
 
 use super::witness::suffix_witness_coefficient_packing_partials;
@@ -382,12 +382,36 @@ where
 {
     fn decompose_fold_batch(
         &self,
-        _prepared: Option<&Self::PreparedSetup>,
+        prepared: Option<&Self::PreparedSetup>,
         source: RecursiveFoldBatchView<'_, F, D>,
-        _plan: DecomposeFoldBatchPlan<'_>,
-    ) -> Result<BatchDecomposeFoldOutcome<F, D>, AkitaError> {
-        let _ = source.polys;
-        Ok(BatchDecomposeFoldOutcome::FallbackPerPoly)
+        plan: DecomposeFoldBatchPlan<'_>,
+    ) -> Result<crate::DecomposeFoldWitness<F>, AkitaError> {
+        let challenges_per_poly = plan.challenges_per_poly(source.polys.len())?;
+        let DecomposeFoldBatchPlan::Sparse {
+            challenges,
+            num_positions_per_block,
+            num_digits,
+            log_basis,
+        } = plan;
+        aggregate_decompose_fold_witnesses::<F, D>(
+            source
+                .polys
+                .iter()
+                .zip(challenges.chunks_exact(challenges_per_poly))
+                .map(|(poly, poly_challenges)| {
+                    <Self as OpeningFoldKernel<RecursiveFoldView<'_, F, D>, F, D>>::decompose_fold(
+                        self,
+                        prepared,
+                        poly.opening_view()?,
+                        DecomposeFoldPlan {
+                            challenges: poly_challenges,
+                            num_positions_per_block,
+                            num_digits,
+                            log_basis,
+                        },
+                    )
+                }),
+        )
     }
 }
 

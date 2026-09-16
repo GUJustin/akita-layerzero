@@ -3,7 +3,7 @@ use super::fold::fold_onehot_block_ring;
 use super::fold::{fold_onehot_block, fold_onehot_block_subfield};
 use super::*;
 use crate::compute::{
-    BatchDecomposeFoldOutcome, CommitInnerPlan, ComputeBackendSetup, CpuBackend,
+    aggregate_decompose_fold_witnesses, CommitInnerPlan, ComputeBackendSetup, CpuBackend,
     DecomposeFoldBatchPlan, DecomposeFoldPlan, OpeningBatchKernel, OpeningFoldKernel,
     OpeningFoldOutput, OpeningFoldPlan, RootOpeningSource, RootPolyMeta, RootPolyShape,
     SubringCoefficientPackingBatchKernel, SubringCoefficientPackingPartials,
@@ -212,7 +212,8 @@ where
         _prepared: Option<&Self::PreparedSetup>,
         source: OneHotBatchView<'_, F, D, I>,
         plan: DecomposeFoldBatchPlan<'_>,
-    ) -> Result<BatchDecomposeFoldOutcome<F, D>, AkitaError> {
+    ) -> Result<DecomposeFoldWitness<F>, AkitaError> {
+        let challenges_per_poly = plan.challenges_per_poly(source.polys.len())?;
         let DecomposeFoldBatchPlan::Sparse {
             challenges,
             num_positions_per_block,
@@ -226,8 +227,21 @@ where
             num_digits,
             log_basis,
         ) {
-            Some(witness) => Ok(BatchDecomposeFoldOutcome::Fused(witness)),
-            None => Ok(BatchDecomposeFoldOutcome::FallbackPerPoly),
+            Some(witness) => Ok(witness),
+            None => aggregate_decompose_fold_witnesses::<F, D>(
+                source
+                    .polys
+                    .iter()
+                    .zip(challenges.chunks_exact(challenges_per_poly))
+                    .map(|(poly, poly_challenges)| {
+                        Ok(poly.decompose_fold::<D>(
+                            poly_challenges,
+                            num_positions_per_block,
+                            num_digits,
+                            log_basis,
+                        ))
+                    }),
+            ),
         }
     }
 }

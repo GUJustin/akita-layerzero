@@ -1,8 +1,8 @@
 //! Fold-l∞ Fiat–Shamir grind: preview off-sponge clones, commit the winning nonce.
 
 use crate::compute::{
-    OpeningBatchKernel, OpeningFoldKernel, RootOpeningSource, RuntimeOpeningProveBackendFor,
-    RuntimeOpeningSource,
+    aggregate_decompose_fold_witnesses, OpeningBatchKernel, RootOpeningSource,
+    RuntimeOpeningProveBackendFor, RuntimeOpeningSource,
 };
 use akita_challenges::{Challenges, FoldDraw, LiveFoldDraw, PreviewFoldDraw};
 use akita_error::AkitaError;
@@ -19,10 +19,7 @@ use akita_types::{OpeningFamily, OpeningMethod};
 use jolt_field::Unreduced;
 use jolt_field::{CanonicalEncoding, Field, Ring};
 
-use super::ring_relation::{
-    aggregate_decompose_fold_witnesses, build_point_decompose_fold_witness,
-    window_sparse_challenges,
-};
+use super::ring_relation::{build_point_decompose_fold_witness, window_sparse_challenges};
 use super::ring_relation_witness::{CenteredFoldChunk, FoldChunkCoefficients};
 use crate::DecomposeFoldWitness;
 use akita_types::dispatch_for_field;
@@ -314,8 +311,7 @@ where
     F: Field + CanonicalEncoding + akita_serialization::AkitaSerialize,
     P: RootOpeningSource<F, D>,
     B: crate::compute::ComputeBackendSetup<F>
-        + for<'a> OpeningBatchKernel<P::OpeningBatchView<'a>, F, D>
-        + for<'a> OpeningFoldKernel<P::OpeningView<'a>, F, D>,
+        + for<'a> OpeningBatchKernel<P::OpeningBatchView<'a>, F, D>,
 {
     let num_chunks = root_lp.witness_chunk.num_chunks;
     if num_chunks <= 1 {
@@ -353,7 +349,7 @@ where
         .iter()
         .map(CenteredFoldChunk::from_witness)
         .collect();
-    let global = aggregate_decompose_fold_witnesses::<F, D>(windows)?;
+    let global = aggregate_decompose_fold_witnesses::<F, D>(windows.into_iter().map(Ok))?;
     Ok((global, FoldChunkCoefficients::chunked(per_chunk)?))
 }
 

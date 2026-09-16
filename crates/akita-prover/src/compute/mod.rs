@@ -46,8 +46,9 @@ pub use cpu::{
     CpuPreparedSetup, PreparedCrtNttProfile, PreparedNttCacheMetric,
 };
 pub use delegating_cpu::{CommitCluster, OpeningCluster, RingSwitchCluster, TensorCluster};
+pub(crate) use kernels::aggregate_decompose_fold_witnesses;
 pub use kernels::{
-    BatchDecomposeFoldOutcome, OpeningBatchKernel, OpeningFoldKernel, RingSwitchRelationKernel,
+    OpeningBatchKernel, OpeningFoldKernel, RingSwitchRelationKernel,
     SubringCoefficientPackingBatchKernel, TensorProjectionBatchKernel, TensorProjectionKernel,
 };
 pub use operation_plans::{

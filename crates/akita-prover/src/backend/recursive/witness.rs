@@ -443,12 +443,12 @@ where
 use crate::backend::coefficient_packing::{
     coefficient_packing_partials_from_position_source, FusedPackingWeights,
 };
+use crate::compute::aggregate_decompose_fold_witnesses;
 use crate::compute::{
-    BatchDecomposeFoldOutcome, DecomposeFoldBatchPlan, DecomposeFoldPlan, OpeningBatchKernel,
-    OpeningFoldKernel, OpeningFoldOutput, OpeningFoldPlan, RootOpeningSource, RootPolyMeta,
-    RootPolyShape, RootTensorSource, SubringCoefficientPackingBatchKernel,
-    SubringCoefficientPackingPartials, SubringCoefficientPackingPlan, TensorProjectionBatchKernel,
-    TensorProjectionKernel,
+    DecomposeFoldBatchPlan, DecomposeFoldPlan, OpeningBatchKernel, OpeningFoldKernel,
+    OpeningFoldOutput, OpeningFoldPlan, RootOpeningSource, RootPolyMeta, RootPolyShape,
+    RootTensorSource, SubringCoefficientPackingBatchKernel, SubringCoefficientPackingPartials,
+    SubringCoefficientPackingPlan, TensorProjectionBatchKernel, TensorProjectionKernel,
 };
 use jolt_field::MulBaseUnreduced;
 
@@ -622,11 +622,36 @@ where
 {
     fn decompose_fold_batch(
         &self,
-        _prepared: Option<&Self::PreparedSetup>,
-        _source: SuffixWitnessBatchView<'_, F, D>,
-        _plan: DecomposeFoldBatchPlan<'_>,
-    ) -> Result<BatchDecomposeFoldOutcome<F, D>, AkitaError> {
-        Ok(BatchDecomposeFoldOutcome::FallbackPerPoly)
+        prepared: Option<&Self::PreparedSetup>,
+        source: SuffixWitnessBatchView<'_, F, D>,
+        plan: DecomposeFoldBatchPlan<'_>,
+    ) -> Result<DecomposeFoldWitness<F>, AkitaError> {
+        let challenges_per_poly = plan.challenges_per_poly(source.polys.len())?;
+        let DecomposeFoldBatchPlan::Sparse {
+            challenges,
+            num_positions_per_block,
+            num_digits,
+            log_basis,
+        } = plan;
+        aggregate_decompose_fold_witnesses::<F, D>(
+            source
+                .polys
+                .iter()
+                .zip(challenges.chunks_exact(challenges_per_poly))
+                .map(|(poly, poly_challenges)| {
+                    <Self as OpeningFoldKernel<SuffixWitnessView<'_, F, D>, F, D>>::decompose_fold(
+                        self,
+                        prepared,
+                        poly.opening_view()?,
+                        DecomposeFoldPlan {
+                            challenges: poly_challenges,
+                            num_positions_per_block,
+                            num_digits,
+                            log_basis,
+                        },
+                    )
+                }),
+        )
     }
 }
 

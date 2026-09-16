@@ -5,7 +5,7 @@ use crate::backend::coefficient_packing::{
     coefficient_packing_partials_from_position_source, FusedPackingWeights,
 };
 use crate::compute::{
-    BatchDecomposeFoldOutcome, CpuBackend, DecomposeFoldBatchPlan, DecomposeFoldPlan,
+    aggregate_decompose_fold_witnesses, CpuBackend, DecomposeFoldBatchPlan, DecomposeFoldPlan,
     OpeningBatchKernel, OpeningFoldKernel, OpeningFoldOutput, OpeningFoldPlan, RootPolyMeta,
     SubringCoefficientPackingBatchKernel, SubringCoefficientPackingPartials,
     SubringCoefficientPackingPlan,
@@ -78,10 +78,30 @@ where
     fn decompose_fold_batch(
         &self,
         _prepared: Option<&Self::PreparedSetup>,
-        _source: DenseBatchView<'_, F, D>,
-        _plan: DecomposeFoldBatchPlan<'_>,
-    ) -> Result<BatchDecomposeFoldOutcome<F, D>, AkitaError> {
-        Ok(BatchDecomposeFoldOutcome::FallbackPerPoly)
+        source: DenseBatchView<'_, F, D>,
+        plan: DecomposeFoldBatchPlan<'_>,
+    ) -> Result<DecomposeFoldWitness<F>, AkitaError> {
+        let challenges_per_poly = plan.challenges_per_poly(source.polys.len())?;
+        let DecomposeFoldBatchPlan::Sparse {
+            challenges,
+            num_positions_per_block,
+            num_digits,
+            log_basis,
+        } = plan;
+        aggregate_decompose_fold_witnesses::<F, D>(
+            source
+                .polys
+                .iter()
+                .zip(challenges.chunks_exact(challenges_per_poly))
+                .map(|(poly, poly_challenges)| {
+                    Ok(poly.decompose_fold::<D>(
+                        poly_challenges,
+                        num_positions_per_block,
+                        num_digits,
+                        log_basis,
+                    ))
+                }),
+        )
     }
 }
 

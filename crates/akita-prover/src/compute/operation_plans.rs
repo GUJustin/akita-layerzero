@@ -277,6 +277,30 @@ pub enum DecomposeFoldBatchPlan<'a> {
     },
 }
 
+impl DecomposeFoldBatchPlan<'_> {
+    /// Validate a uniform batch and return each polynomial's challenge count.
+    pub fn challenges_per_poly(self, num_polys: usize) -> Result<usize, AkitaError> {
+        if num_polys == 0 {
+            return Err(AkitaError::InvalidInput(
+                "batched decompose_fold requires at least one polynomial".to_string(),
+            ));
+        }
+        let Self::Sparse { challenges, .. } = self;
+        if challenges.is_empty() {
+            return Err(AkitaError::InvalidInput(
+                "batched decompose_fold requires at least one challenge per polynomial".to_string(),
+            ));
+        }
+        if !challenges.len().is_multiple_of(num_polys) {
+            return Err(AkitaError::InvalidInput(
+                "batched decompose_fold challenge count is not divisible by polynomial count"
+                    .to_string(),
+            ));
+        }
+        Ok(challenges.len() / num_polys)
+    }
+}
+
 /// Scalar operation parameters for the fused ring-switch relation rows.
 ///
 /// The decomposed witness data (`e_hat`, `t_hat`, centered `z` segment) and the

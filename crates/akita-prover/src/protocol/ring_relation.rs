@@ -4,9 +4,8 @@
 //! [`RingRelationProver`].
 use crate::commitment::{InnerRelationState, OuterCompressionState};
 use crate::compute::{
-    BatchDecomposeFoldOutcome, DecomposeFoldBatchPlan, DecomposeFoldPlan, DigitRowsComputeBackend,
-    OpeningBatchKernel, OpeningFoldKernel, OperationCtx, RootOpeningSource,
-    RuntimeRingSwitchProveBackend,
+    DecomposeFoldBatchPlan, DigitRowsComputeBackend, OpeningBatchKernel, OperationCtx,
+    RootOpeningSource, RuntimeRingSwitchProveBackend,
 };
 use crate::validation::validate_i8_setup_log_basis;
 use crate::{DecomposeFoldWitness, ProverOpeningData};
@@ -228,51 +227,6 @@ fn decompose_e_hat<
     Ok(e_hat)
 }
 
-pub(super) fn aggregate_decompose_fold_witnesses<F: Field, const D: usize>(
-    witnesses: Vec<DecomposeFoldWitness<F>>,
-) -> Result<DecomposeFoldWitness<F>, AkitaError> {
-    let mut witnesses = witnesses.into_iter();
-    let Some(first) = witnesses.next() else {
-        return Err(AkitaError::InvalidInput(
-            "batched decompose_fold requires at least one witness".to_string(),
-        ));
-    };
-    first.ensure_ring_dim::<D>()?;
-    let row_count = first.row_count();
-    let (z_folded_rings, mut centered_coeffs) = first.into_owned_flat_parts();
-    let mut z_folded_coeffs = z_folded_rings.into_coeffs();
-
-    for witness in witnesses {
-        witness.ensure_ring_dim::<D>()?;
-        if witness.row_count() != row_count {
-            return Err(AkitaError::InvalidInput(
-                "batched decompose_fold witness length mismatch".to_string(),
-            ));
-        }
-        for (dst, src) in z_folded_coeffs
-            .iter_mut()
-            .zip(witness.z_folded_rings.coeffs())
-        {
-            *dst += *src;
-        }
-        for (dst, src) in centered_coeffs
-            .iter_mut()
-            .zip(witness.centered_coeffs_flat())
-        {
-            *dst = dst.checked_add(*src).ok_or_else(|| {
-                AkitaError::InvalidInput(
-                    "batched decompose_fold centered coefficient overflow".to_string(),
-                )
-            })?;
-        }
-    }
-
-    DecomposeFoldWitness::from_owned_flat_parts::<D>(
-        akita_types::RingVec::from_coeffs_with_ring_dim(z_folded_coeffs, D)?,
-        centered_coeffs,
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_point_decompose_fold_witness<F, P, B, const D: usize>(
     backend: &B,
@@ -288,12 +242,11 @@ where
     F: Field + CanonicalEncoding + akita_serialization::AkitaSerialize,
     P: RootOpeningSource<F, D>,
     B: crate::compute::ComputeBackendSetup<F>
-        + for<'a> OpeningBatchKernel<P::OpeningBatchView<'a>, F, D>
-        + for<'a> OpeningFoldKernel<P::OpeningView<'a>, F, D>,
+        + for<'a> OpeningBatchKernel<P::OpeningBatchView<'a>, F, D>,
 {
     let point_challenges = challenges.select_claims(point_indices)?;
     let batch_view = P::opening_batch(point_polys)?;
-    match OpeningBatchKernel::decompose_fold_batch(
+    OpeningBatchKernel::decompose_fold_batch(
         backend,
         prepared,
         batch_view,
@@ -303,36 +256,7 @@ where
             num_digits: num_digits_inner,
             log_basis: log_basis_inner,
         },
-    )? {
-        BatchDecomposeFoldOutcome::Fused(z_point) => Ok(z_point),
-        BatchDecomposeFoldOutcome::FallbackPerPoly => {
-            let witnesses: Vec<DecomposeFoldWitness<F>> = point_polys
-                .iter()
-                .zip(
-                    point_challenges
-                        .as_slice()
-                        .chunks(point_challenges.num_live_blocks_per_claim()),
-                )
-                .map(|(poly, poly_challenges)| -> Result<_, AkitaError> {
-                    OpeningFoldKernel::decompose_fold(
-                        backend,
-                        prepared,
-                        poly.opening_view()?,
-                        DecomposeFoldPlan {
-                            challenges: poly_challenges,
-                            num_positions_per_block,
-                            num_digits: num_digits_inner,
-                            log_basis: log_basis_inner,
-                        },
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            aggregate_decompose_fold_witnesses::<F, D>(witnesses)
-        }
-        BatchDecomposeFoldOutcome::Unsupported => Err(AkitaError::InvalidSetup(
-            "sparse batched fold is unsupported for this polynomial backend".to_string(),
-        )),
-    }
+    )
 }
 
 /// Validate the chunked-witness configuration at the prover boundary (no-panic
