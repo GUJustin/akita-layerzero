@@ -1,4 +1,5 @@
 use super::*;
+use crate::compute::CpuBackend;
 
 fn assert_retained_sweeps_match<const D: usize>(seed: u64) {
     use super::super::column_sweep::{column_sweep_ajtai_onehot_multi_forced, OneHotSweep};
@@ -38,7 +39,7 @@ fn assert_retained_sweeps_match<const D: usize>(seed: u64) {
         n_a,
         active_a_cols,
         1,
-        crate::compute::CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER,
+        Some(CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER),
         OneHotSweep::Bucketed,
     )
     .unwrap();
@@ -48,7 +49,7 @@ fn assert_retained_sweeps_match<const D: usize>(seed: u64) {
         n_a,
         active_a_cols,
         1,
-        crate::compute::CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER,
+        Some(CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER),
         OneHotSweep::Merge,
     )
     .unwrap();
@@ -65,7 +66,7 @@ fn retained_sweeps_match_across_polys_and_dimensions() {
 
 #[test]
 fn configured_scratch_budget_preserves_onehot_commit_arithmetic() {
-    use crate::compute::{CommitInnerPlan, ComputeBackendSetup, CpuBackend};
+    use crate::compute::{CommitInnerPlan, ComputeBackendSetup};
     use crate::AkitaProverSetup;
     use akita_types::SetupMatrixCapacity;
 
@@ -131,8 +132,65 @@ fn configured_scratch_budget_preserves_onehot_commit_arithmetic() {
 }
 
 #[test]
+fn automatic_scratch_fits_large_blocks_and_preserves_explicit_caps() {
+    use crate::compute::{CommitInnerPlan, ComputeBackendSetup};
+    use crate::AkitaProverSetup;
+    use akita_types::SetupMatrixCapacity;
+
+    type F = Prime128Offset275;
+    const D: usize = 64;
+    let positions = 1 << 14;
+    let block_fields = positions * D;
+    let mut indices = vec![None; 2 * block_fields];
+    indices[0] = Some(0u8);
+    indices[block_fields] = Some(0);
+    let poly = OneHotPoly::<F, u8>::new(1, indices).unwrap();
+    let plan = CommitInnerPlan {
+        ring_dimension: D,
+        num_live_blocks: 2,
+        n_a: 1,
+        num_positions_per_block: positions,
+        num_digits_inner: 1,
+        log_basis_inner: 1,
+    };
+    let setup = AkitaProverSetup::<F>::generate_with_capacity(
+        21,
+        1,
+        SetupMatrixCapacity {
+            num_field_elements: block_fields,
+        },
+    )
+    .unwrap();
+    let backend = CpuBackend::DEFAULT;
+    let prepared = backend.prepare_setup(&setup).unwrap();
+    let sources = [poly.commitment_source()];
+    let capped = CpuBackend::with_resource_limits(
+        CpuBackend::DEFAULT_MAX_CACHED_RING_SWITCH_ELEMENTS,
+        CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER,
+    )
+    .unwrap();
+    assert!(matches!(
+        commit_onehot_sources::<F, D, u8>(&capped, &prepared, &sources, plan),
+        Err(AkitaError::InvalidSetup(_))
+    ));
+
+    let witnesses = commit_onehot_sources::<F, D, u8>(&backend, &prepared, &sources, plan).unwrap();
+    let matrix = setup
+        .expanded
+        .shared_matrix
+        .ring_view::<D>(1, positions)
+        .unwrap();
+    let first_column = matrix.rows().next().unwrap()[0];
+    assert_eq!(witnesses.len(), 1);
+    assert_eq!(
+        witnesses[0].inner_rows.coeffs(),
+        [first_column.coeffs, first_column.coeffs].concat()
+    );
+}
+
+#[test]
 fn every_stored_index_width_reaches_the_same_commitment_sweep() {
-    use crate::compute::{CommitInnerPlan, ComputeBackendSetup, CpuBackend};
+    use crate::compute::{CommitInnerPlan, ComputeBackendSetup};
     use crate::AkitaProverSetup;
     use akita_types::SetupMatrixCapacity;
 
@@ -266,7 +324,7 @@ where
                 n_a,
                 active_a_cols,
                 1,
-                crate::compute::CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER,
+                Some(CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER),
                 sweep,
             )
             .unwrap(),

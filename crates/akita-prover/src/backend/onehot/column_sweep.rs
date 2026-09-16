@@ -1,6 +1,7 @@
 #[cfg(test)]
 use super::inner_ajtai::inner_ajtai_wide_onehot;
 use super::*;
+use crate::compute::CpuBackend;
 
 /// Bucketed and merge are arithmetic choices inside the same block range
 /// driver. This enum is private policy state, not a source or plan type.
@@ -246,7 +247,7 @@ fn block_tile_for_scratch<F, const D: usize>(
     total_blocks: usize,
     active_a_cols: usize,
     max_entries_per_block: usize,
-    scratch_bytes_per_worker: usize,
+    scratch_bytes_per_worker: Option<usize>,
 ) -> Result<usize, AkitaError>
 where
     F: Field + WithCommitAccumulator,
@@ -279,6 +280,8 @@ where
     let minimum = fixed
         .checked_add(per_block)
         .ok_or_else(|| AkitaError::InvalidSetup("one hot minimum scratch overflow".into()))?;
+    let scratch_bytes_per_worker = scratch_bytes_per_worker
+        .unwrap_or_else(|| CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER.max(minimum));
     if minimum > scratch_bytes_per_worker {
         return Err(AkitaError::InvalidSetup(format!(
             "one hot commitment geometry needs at least {minimum} scratch bytes per worker but the CPU backend allows {scratch_bytes_per_worker}"
@@ -378,7 +381,7 @@ fn column_sweep_ajtai_onehot_multi_with_sweep<F, const D: usize, I>(
     n_a: usize,
     active_a_cols: usize,
     num_digits_inner: usize,
-    scratch_bytes_per_worker: usize,
+    scratch_bytes_per_worker: Option<usize>,
     forced_sweep: Option<OneHotSweep>,
 ) -> Result<Vec<Vec<Vec<CyclotomicRing<F, D>>>>, AkitaError>
 where
@@ -445,7 +448,7 @@ where
         active_a_cols,
         ring_dimension = D,
         estimated_matrix_passes = matrix_passes,
-        scratch_bytes_per_worker,
+        scratch_bytes_per_worker = ?scratch_bytes_per_worker,
         "one hot commit schedule"
     );
 
@@ -525,7 +528,7 @@ pub(crate) fn column_sweep_ajtai_onehot_multi<F, const D: usize, I>(
     n_a: usize,
     active_a_cols: usize,
     num_digits_inner: usize,
-    scratch_bytes_per_worker: usize,
+    scratch_bytes_per_worker: Option<usize>,
 ) -> Result<Vec<Vec<Vec<CyclotomicRing<F, D>>>>, AkitaError>
 where
     F: Field + CanonicalEncoding + WithCommitAccumulator,
@@ -550,7 +553,7 @@ pub(super) fn column_sweep_ajtai_onehot_multi_forced<F, const D: usize, I>(
     n_a: usize,
     active_a_cols: usize,
     num_digits_inner: usize,
-    scratch_bytes_per_worker: usize,
+    scratch_bytes_per_worker: Option<usize>,
     sweep: OneHotSweep,
 ) -> Result<Vec<Vec<Vec<CyclotomicRing<F, D>>>>, AkitaError>
 where

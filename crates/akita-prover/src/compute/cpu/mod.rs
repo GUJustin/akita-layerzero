@@ -32,23 +32,25 @@ pub use prepared::{CpuPreparedSetup, PreparedCrtNttProfile, PreparedNttCacheMetr
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct CpuBackend {
     max_cached_ring_switch_elements: usize,
-    commit_scratch_bytes_per_worker: usize,
+    commit_scratch_bytes_per_worker: Option<usize>,
 }
 
 impl CpuBackend {
     /// Default maximum cached extent for a ring-switch NTT operation.
     pub const DEFAULT_MAX_CACHED_RING_SWITCH_ELEMENTS: usize = 1 << 21;
 
-    /// Default temporary sparse commitment memory per worker.
+    /// Target temporary sparse commitment memory per worker in automatic mode.
+    /// The kernel raises this target when its minimum tile needs more scratch.
     pub const DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER: usize = 8 << 20;
 
-    /// CPU backend with the default resource limits.
+    /// CPU backend with the default ring-switch limit and automatic commitment scratch sizing.
     pub const DEFAULT: Self = Self {
         max_cached_ring_switch_elements: Self::DEFAULT_MAX_CACHED_RING_SWITCH_ELEMENTS,
-        commit_scratch_bytes_per_worker: Self::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER,
+        commit_scratch_bytes_per_worker: None,
     };
 
     /// Create a CPU backend with explicit resource limits.
+    /// The commitment scratch cap is never raised to fit a kernel's minimum tile.
     pub fn with_resource_limits(
         max_cached_ring_switch_elements: usize,
         commit_scratch_bytes_per_worker: usize,
@@ -60,7 +62,7 @@ impl CpuBackend {
         }
         Ok(Self {
             max_cached_ring_switch_elements,
-            commit_scratch_bytes_per_worker,
+            commit_scratch_bytes_per_worker: Some(commit_scratch_bytes_per_worker),
         })
     }
 
@@ -69,8 +71,10 @@ impl CpuBackend {
         self.max_cached_ring_switch_elements
     }
 
-    /// Temporary sparse commitment memory allowed per worker.
-    pub const fn commit_scratch_bytes_per_worker(&self) -> usize {
+    /// Explicit temporary sparse commitment cap per worker, or `None` for automatic sizing.
+    /// Automatic sizing uses at least [`Self::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER`]
+    /// and grows to accommodate one block for the commitment's geometry.
+    pub const fn commit_scratch_bytes_per_worker(&self) -> Option<usize> {
         self.commit_scratch_bytes_per_worker
     }
 

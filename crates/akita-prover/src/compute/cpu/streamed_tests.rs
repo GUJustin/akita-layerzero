@@ -46,14 +46,15 @@ fn cpu_resource_limits_have_checked_defaults_and_boundaries() {
         default.max_cached_ring_switch_elements(),
         CpuBackend::DEFAULT_MAX_CACHED_RING_SWITCH_ELEMENTS
     );
-    assert_eq!(
-        default.commit_scratch_bytes_per_worker(),
-        CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER
-    );
+    assert_eq!(default.commit_scratch_bytes_per_worker(), None);
 
     let stream_all =
         CpuBackend::with_resource_limits(0, CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER)
             .unwrap();
+    assert_eq!(
+        stream_all.commit_scratch_bytes_per_worker(),
+        Some(CpuBackend::DEFAULT_COMMIT_SCRATCH_BYTES_PER_WORKER)
+    );
     assert!(!stream_all.ntt_operation_uses_cache(NttOperationCluster::RingSwitch, 1));
     assert!(stream_all.ntt_operation_uses_cache(NttOperationCluster::Commit, usize::MAX));
 
