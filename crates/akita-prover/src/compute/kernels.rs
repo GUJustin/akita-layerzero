@@ -8,7 +8,8 @@ use crate::DecomposeFoldWitness;
 use akita_error::AkitaError;
 use jolt_field::{CanonicalEncoding, ExtField, Field, MulBaseUnreduced};
 
-pub(crate) fn aggregate_decompose_fold_witnesses<F: Field, const D: usize>(
+/// Checked aggregation for batch kernels that fold their sources individually.
+pub fn aggregate_decompose_fold_witnesses<F: Field, const D: usize>(
     witnesses: impl IntoIterator<Item = Result<DecomposeFoldWitness<F>, AkitaError>>,
 ) -> Result<DecomposeFoldWitness<F>, AkitaError> {
     let mut witnesses = witnesses.into_iter();

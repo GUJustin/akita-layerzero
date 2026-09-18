@@ -244,6 +244,12 @@ where
     B: crate::compute::ComputeBackendSetup<F>
         + for<'a> OpeningBatchKernel<P::OpeningBatchView<'a>, F, D>,
 {
+    if point_polys.len() != point_indices.len() {
+        return Err(AkitaError::InvalidSize {
+            expected: point_indices.len(),
+            actual: point_polys.len(),
+        });
+    }
     let point_challenges = challenges.select_claims(point_indices)?;
     let batch_view = P::opening_batch(point_polys)?;
     OpeningBatchKernel::decompose_fold_batch(
@@ -252,6 +258,7 @@ where
         batch_view,
         DecomposeFoldBatchPlan::Sparse {
             challenges: point_challenges.as_slice(),
+            challenges_per_poly: point_challenges.num_live_blocks_per_claim(),
             num_positions_per_block,
             num_digits: num_digits_inner,
             log_basis: log_basis_inner,

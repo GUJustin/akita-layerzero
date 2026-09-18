@@ -1,6 +1,6 @@
 use akita_algebra::CyclotomicRing;
 use akita_challenges::SparseChallenge;
-use akita_error::AkitaError;
+use akita_error::{checked, AkitaError};
 use akita_types::{
     CommittedGroupParams, GroupCommitPhaseParams, PreparedSubringCoefficientPackingPoint,
     SubfieldMultiplierOpeningPoint, SubringCoefficientPackingGeometry,
@@ -268,6 +268,8 @@ pub enum DecomposeFoldBatchPlan<'a> {
     Sparse {
         /// Sparse fold challenges, outermost first.
         challenges: &'a [SparseChallenge],
+        /// Exact number of challenges assigned to each polynomial.
+        challenges_per_poly: usize,
         /// Number of ring-element positions in each block.
         num_positions_per_block: usize,
         /// Number of balanced digits.
@@ -278,26 +280,46 @@ pub enum DecomposeFoldBatchPlan<'a> {
 }
 
 impl DecomposeFoldBatchPlan<'_> {
-    /// Validate a uniform batch and return each polynomial's challenge count.
-    pub fn challenges_per_poly(self, num_polys: usize) -> Result<usize, AkitaError> {
+    /// Validate the challenge layout against every source's live-block extent.
+    pub fn validate_uniform_batch(
+        self,
+        live_blocks: impl ExactSizeIterator<Item = usize>,
+    ) -> Result<(), AkitaError> {
+        let Self::Sparse {
+            challenges,
+            challenges_per_poly,
+            num_positions_per_block,
+            ..
+        } = self;
+        let num_polys = live_blocks.len();
         if num_polys == 0 {
             return Err(AkitaError::InvalidInput(
                 "batched decompose_fold requires at least one polynomial".to_string(),
             ));
         }
-        let Self::Sparse { challenges, .. } = self;
-        if challenges.is_empty() {
+        if challenges_per_poly == 0 || num_positions_per_block == 0 {
             return Err(AkitaError::InvalidInput(
-                "batched decompose_fold requires at least one challenge per polynomial".to_string(),
+                "batched decompose_fold requires positive block geometry".to_string(),
             ));
         }
-        if !challenges.len().is_multiple_of(num_polys) {
+        let expected = checked::product([num_polys, challenges_per_poly]).ok_or_else(|| {
+            AkitaError::InvalidInput("batched decompose_fold challenge count overflow".into())
+        })?;
+        if challenges.len() != expected {
+            return Err(AkitaError::InvalidSize {
+                expected,
+                actual: challenges.len(),
+            });
+        }
+        if live_blocks
+            .into_iter()
+            .any(|count| count != challenges_per_poly)
+        {
             return Err(AkitaError::InvalidInput(
-                "batched decompose_fold challenge count is not divisible by polynomial count"
-                    .to_string(),
+                "batched decompose_fold sources have different live-block extents".into(),
             ));
         }
-        Ok(challenges.len() / num_polys)
+        Ok(())
     }
 }
 

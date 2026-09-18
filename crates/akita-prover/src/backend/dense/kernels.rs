@@ -7,7 +7,7 @@ use crate::backend::coefficient_packing::{
 use crate::compute::{
     aggregate_decompose_fold_witnesses, CpuBackend, DecomposeFoldBatchPlan, DecomposeFoldPlan,
     OpeningBatchKernel, OpeningFoldKernel, OpeningFoldOutput, OpeningFoldPlan, RootPolyMeta,
-    SubringCoefficientPackingBatchKernel, SubringCoefficientPackingPartials,
+    RootPolyShape, SubringCoefficientPackingBatchKernel, SubringCoefficientPackingPartials,
     SubringCoefficientPackingPlan,
 };
 use crate::DecomposeFoldWitness;
@@ -81,13 +81,16 @@ where
         source: DenseBatchView<'_, F, D>,
         plan: DecomposeFoldBatchPlan<'_>,
     ) -> Result<DecomposeFoldWitness<F>, AkitaError> {
-        let challenges_per_poly = plan.challenges_per_poly(source.polys.len())?;
         let DecomposeFoldBatchPlan::Sparse {
             challenges,
+            challenges_per_poly,
             num_positions_per_block,
             num_digits,
             log_basis,
         } = plan;
+        plan.validate_uniform_batch(source.polys.iter().map(|poly| {
+            RootPolyShape::<F, D>::num_live_ring_elems(*poly).div_ceil(num_positions_per_block)
+        }))?;
         aggregate_decompose_fold_witnesses::<F, D>(
             source
                 .polys

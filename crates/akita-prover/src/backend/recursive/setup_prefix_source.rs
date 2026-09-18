@@ -386,13 +386,16 @@ where
         source: RecursiveFoldBatchView<'_, F, D>,
         plan: DecomposeFoldBatchPlan<'_>,
     ) -> Result<crate::DecomposeFoldWitness<F>, AkitaError> {
-        let challenges_per_poly = plan.challenges_per_poly(source.polys.len())?;
         let DecomposeFoldBatchPlan::Sparse {
             challenges,
+            challenges_per_poly,
             num_positions_per_block,
             num_digits,
             log_basis,
         } = plan;
+        plan.validate_uniform_batch(source.polys.iter().map(|poly| {
+            RootPolyShape::<F, D>::num_live_ring_elems(*poly).div_ceil(num_positions_per_block)
+        }))?;
         aggregate_decompose_fold_witnesses::<F, D>(
             source
                 .polys
@@ -873,5 +876,40 @@ mod tests {
                     .unwrap(),
             ]
         );
+
+        let short_witness =
+            RecursiveFoldSource::witness(Arc::new(RecursiveWitnessFlat::from_i8_digits(vec![
+                1;
+                D
+            ])));
+        let challenges = vec![
+            SparseChallenge {
+                positions: vec![0].into(),
+                coeffs: vec![1].into(),
+            };
+            8
+        ];
+        let run = |refs: &[&RecursiveFoldSource<F>], challenges_per_poly| {
+            OpeningBatchKernel::decompose_fold_batch(
+                &CpuBackend::DEFAULT,
+                None,
+                <RecursiveFoldSource<F> as RootOpeningSource<F, D>>::opening_batch(refs).unwrap(),
+                DecomposeFoldBatchPlan::Sparse {
+                    challenges: &challenges,
+                    challenges_per_poly,
+                    num_positions_per_block: 1,
+                    num_digits: 1,
+                    log_basis: 1,
+                },
+            )
+        };
+        assert!(matches!(
+            run(&[&source, &short_witness], 4),
+            Err(AkitaError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            run(&[&source, &source], 5),
+            Err(AkitaError::InvalidSize { .. })
+        ));
     }
 }
