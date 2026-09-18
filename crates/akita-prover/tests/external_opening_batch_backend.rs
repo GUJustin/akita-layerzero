@@ -19,8 +19,10 @@ impl OpeningBatchKernel<ExternalBatch<'_>, F, D> for CpuBackend {
         _prepared: Option<&Self::PreparedSetup>,
         source: ExternalBatch<'_>,
         _plan: DecomposeFoldBatchPlan<'_>,
-    ) -> Result<DecomposeFoldWitness<F>, AkitaError> {
-        aggregate_decompose_fold_witnesses::<F, D>(source.0.iter().cloned().map(Ok))
+    ) -> Result<Vec<DecomposeFoldWitness<F>>, AkitaError> {
+        Ok(vec![aggregate_decompose_fold_witnesses::<F, D>(
+            source.0.iter().cloned().map(Ok),
+        )?])
     }
 }
 
@@ -41,6 +43,7 @@ fn downstream_batch_kernel_reuses_checked_aggregation() {
         DecomposeFoldBatchPlan::Sparse {
             challenges: &challenges,
             challenges_per_poly: 1,
+            num_chunks: 1,
             num_positions_per_block: 1,
             num_digits: 1,
             log_basis: 1,
@@ -48,6 +51,6 @@ fn downstream_batch_kernel_reuses_checked_aggregation() {
     )
     .unwrap();
 
-    assert_eq!(got.centered_coeffs_flat(), &[3; D]);
-    assert_eq!(got.z_folded_rings.coeffs(), &[F::from_u64(2); D]);
+    assert_eq!(got[0].centered_coeffs_flat(), &[3; D]);
+    assert_eq!(got[0].z_folded_rings.coeffs(), &[F::from_u64(2); D]);
 }

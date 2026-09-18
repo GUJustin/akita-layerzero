@@ -212,40 +212,42 @@ where
         _prepared: Option<&Self::PreparedSetup>,
         source: OneHotBatchView<'_, F, D, I>,
         plan: DecomposeFoldBatchPlan<'_>,
-    ) -> Result<DecomposeFoldWitness<F>, AkitaError> {
+    ) -> Result<Vec<DecomposeFoldWitness<F>>, AkitaError> {
         let DecomposeFoldBatchPlan::Sparse {
-            challenges,
             challenges_per_poly,
             num_positions_per_block,
             num_digits,
             log_basis,
+            ..
         } = plan;
         plan.validate_uniform_batch(source.polys.iter().map(|poly| {
             RootPolyShape::<F, D>::num_live_ring_elems(*poly).div_ceil(num_positions_per_block)
         }))?;
-        match OneHotPoly::decompose_fold_batched::<D>(
-            source.polys,
-            challenges,
-            num_positions_per_block,
-            num_digits,
-            log_basis,
-        ) {
-            Some(witness) => Ok(witness),
-            None => aggregate_decompose_fold_witnesses::<F, D>(
-                source
-                    .polys
-                    .iter()
-                    .zip(challenges.chunks_exact(challenges_per_poly))
-                    .map(|(poly, poly_challenges)| {
-                        Ok(poly.decompose_fold::<D>(
-                            poly_challenges,
-                            num_positions_per_block,
-                            num_digits,
-                            log_basis,
-                        ))
-                    }),
-            ),
-        }
+        plan.map_challenge_windows(|window| {
+            match OneHotPoly::decompose_fold_batched::<D>(
+                source.polys,
+                window,
+                num_positions_per_block,
+                num_digits,
+                log_basis,
+            ) {
+                Some(witness) => Ok(witness),
+                None => aggregate_decompose_fold_witnesses::<F, D>(
+                    source
+                        .polys
+                        .iter()
+                        .zip(window.chunks_exact(challenges_per_poly))
+                        .map(|(poly, poly_challenges)| {
+                            Ok(poly.decompose_fold::<D>(
+                                poly_challenges,
+                                num_positions_per_block,
+                                num_digits,
+                                log_basis,
+                            ))
+                        }),
+                ),
+            }
+        })
     }
 }
 

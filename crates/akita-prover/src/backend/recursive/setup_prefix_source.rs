@@ -385,36 +385,42 @@ where
         prepared: Option<&Self::PreparedSetup>,
         source: RecursiveFoldBatchView<'_, F, D>,
         plan: DecomposeFoldBatchPlan<'_>,
-    ) -> Result<crate::DecomposeFoldWitness<F>, AkitaError> {
+    ) -> Result<Vec<crate::DecomposeFoldWitness<F>>, AkitaError> {
         let DecomposeFoldBatchPlan::Sparse {
-            challenges,
             challenges_per_poly,
             num_positions_per_block,
             num_digits,
             log_basis,
+            ..
         } = plan;
         plan.validate_uniform_batch(source.polys.iter().map(|poly| {
             RootPolyShape::<F, D>::num_live_ring_elems(*poly).div_ceil(num_positions_per_block)
         }))?;
-        aggregate_decompose_fold_witnesses::<F, D>(
-            source
-                .polys
-                .iter()
-                .zip(challenges.chunks_exact(challenges_per_poly))
-                .map(|(poly, poly_challenges)| {
-                    <Self as OpeningFoldKernel<RecursiveFoldView<'_, F, D>, F, D>>::decompose_fold(
-                        self,
-                        prepared,
-                        poly.opening_view()?,
-                        DecomposeFoldPlan {
-                            challenges: poly_challenges,
-                            num_positions_per_block,
-                            num_digits,
-                            log_basis,
-                        },
-                    )
-                }),
-        )
+        plan.map_challenge_windows(|window| {
+            aggregate_decompose_fold_witnesses::<F, D>(
+                source
+                    .polys
+                    .iter()
+                    .zip(window.chunks_exact(challenges_per_poly))
+                    .map(|(poly, poly_challenges)| {
+                        <Self as OpeningFoldKernel<
+                                RecursiveFoldView<'_, F, D>,
+                                F,
+                                D,
+                            >>::decompose_fold(
+                                self,
+                                prepared,
+                                poly.opening_view()?,
+                                DecomposeFoldPlan {
+                                    challenges: poly_challenges,
+                                    num_positions_per_block,
+                                    num_digits,
+                                    log_basis,
+                                },
+                            )
+                    }),
+            )
+        })
     }
 }
 
@@ -897,6 +903,7 @@ mod tests {
                 DecomposeFoldBatchPlan::Sparse {
                     challenges: &challenges,
                     challenges_per_poly,
+                    num_chunks: 1,
                     num_positions_per_block: 1,
                     num_digits: 1,
                     log_basis: 1,

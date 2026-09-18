@@ -228,16 +228,17 @@ fn decompose_e_hat<
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_point_decompose_fold_witness<F, P, B, const D: usize>(
+pub(super) fn build_point_decompose_fold_witnesses<F, P, B, const D: usize>(
     backend: &B,
     prepared: Option<&B::PreparedSetup>,
     challenges: &Challenges,
     point_polys: &[&P],
     point_indices: &[usize],
+    num_chunks: usize,
     num_positions_per_block: usize,
     num_digits_inner: usize,
     log_basis_inner: u32,
-) -> Result<DecomposeFoldWitness<F>, AkitaError>
+) -> Result<Vec<DecomposeFoldWitness<F>>, AkitaError>
 where
     F: Field + CanonicalEncoding + akita_serialization::AkitaSerialize,
     P: RootOpeningSource<F, D>,
@@ -252,18 +253,26 @@ where
     }
     let point_challenges = challenges.select_claims(point_indices)?;
     let batch_view = P::opening_batch(point_polys)?;
-    OpeningBatchKernel::decompose_fold_batch(
+    let witnesses = OpeningBatchKernel::decompose_fold_batch(
         backend,
         prepared,
         batch_view,
         DecomposeFoldBatchPlan::Sparse {
             challenges: point_challenges.as_slice(),
             challenges_per_poly: point_challenges.num_live_blocks_per_claim(),
+            num_chunks,
             num_positions_per_block,
             num_digits: num_digits_inner,
             log_basis: log_basis_inner,
         },
-    )
+    )?;
+    if witnesses.len() != num_chunks {
+        return Err(AkitaError::InvalidSize {
+            expected: num_chunks,
+            actual: witnesses.len(),
+        });
+    }
+    Ok(witnesses)
 }
 
 /// Validate the chunked-witness configuration at the prover boundary (no-panic
@@ -271,36 +280,6 @@ where
 /// verifier layout resolution.
 pub(crate) fn validate_chunked_witness_cfg(lp: &CommittedGroupParams) -> Result<(), AkitaError> {
     lp.witness_chunk.validate()
-}
-
-/// Restrict sparse fold challenges to one chunk's exact global block range,
-/// zeroing all other blocks. Folding under these yields the partial response
-/// `z_i = Σ_{j∈I_i} c_j s_j`.
-pub(super) fn window_sparse_challenges(
-    challenges: &Challenges,
-    fold_range: std::ops::Range<usize>,
-) -> Result<Challenges, AkitaError> {
-    let windowed: Vec<SparseChallenge> = challenges
-        .as_slice()
-        .iter()
-        .enumerate()
-        .map(|(index, challenge)| {
-            let block = index % challenges.num_live_blocks_per_claim();
-            if fold_range.contains(&block) {
-                challenge.clone()
-            } else {
-                SparseChallenge {
-                    positions: Vec::new().into(),
-                    coeffs: Vec::new().into(),
-                }
-            }
-        })
-        .collect();
-    Challenges::from_sparse(
-        windowed,
-        challenges.num_live_blocks_per_claim(),
-        challenges.num_claims(),
-    )
 }
 
 /// Prover-side builder for the ring relation $M(x) \cdot z = y(x) + (X^D + 1) \cdot r(x)$.

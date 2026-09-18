@@ -270,6 +270,8 @@ pub enum DecomposeFoldBatchPlan<'a> {
         challenges: &'a [SparseChallenge],
         /// Exact number of challenges assigned to each polynomial.
         challenges_per_poly: usize,
+        /// Number of block windows to return.
+        num_chunks: usize,
         /// Number of ring-element positions in each block.
         num_positions_per_block: usize,
         /// Number of balanced digits.
@@ -288,6 +290,7 @@ impl DecomposeFoldBatchPlan<'_> {
         let Self::Sparse {
             challenges,
             challenges_per_poly,
+            num_chunks,
             num_positions_per_block,
             ..
         } = self;
@@ -319,7 +322,48 @@ impl DecomposeFoldBatchPlan<'_> {
                 "batched decompose_fold sources have different live-block extents".into(),
             ));
         }
+        akita_types::dyadic_block_ranges(challenges_per_poly, num_chunks)?;
         Ok(())
+    }
+
+    /// Apply an operation to each canonical claim-major challenge window.
+    ///
+    /// Windows are visited in chunk order and materialized one at a time. The
+    /// single-chunk case borrows the original challenge slice directly.
+    pub fn map_challenge_windows<T>(
+        self,
+        mut map: impl FnMut(&[SparseChallenge]) -> Result<T, AkitaError>,
+    ) -> Result<Vec<T>, AkitaError> {
+        let Self::Sparse {
+            challenges,
+            challenges_per_poly,
+            num_chunks,
+            ..
+        } = self;
+        let ranges = akita_types::dyadic_block_ranges(challenges_per_poly, num_chunks)?;
+        let mut outputs = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            if range == (0..challenges_per_poly) {
+                outputs.push(map(challenges)?);
+                continue;
+            }
+            let window = challenges
+                .iter()
+                .enumerate()
+                .map(|(index, challenge)| {
+                    if range.contains(&(index % challenges_per_poly)) {
+                        challenge.clone()
+                    } else {
+                        SparseChallenge {
+                            positions: Vec::new().into(),
+                            coeffs: Vec::new().into(),
+                        }
+                    }
+                })
+                .collect::<Vec<_>>();
+            outputs.push(map(&window)?);
+        }
+        Ok(outputs)
     }
 }
 

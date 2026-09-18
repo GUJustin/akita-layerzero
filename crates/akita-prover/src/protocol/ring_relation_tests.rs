@@ -30,12 +30,13 @@ fn point_batch_rejects_polynomial_claim_count_mismatch() {
     )
     .unwrap();
 
-    let result = build_point_decompose_fold_witness::<F, DensePoly<F>, CpuBackend, D>(
+    let result = build_point_decompose_fold_witnesses::<F, DensePoly<F>, CpuBackend, D>(
         &CpuBackend::DEFAULT,
         None,
         &challenges,
         &polys,
         &[0, 1],
+        1,
         1,
         1,
         1,

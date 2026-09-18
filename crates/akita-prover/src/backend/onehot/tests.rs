@@ -50,6 +50,7 @@ fn batch_fold_rejects_mixed_extents_and_count_mismatch() {
             DecomposeFoldBatchPlan::Sparse {
                 challenges: &challenges,
                 challenges_per_poly,
+                num_chunks: 1,
                 num_positions_per_block: 1,
                 num_digits: 1,
                 log_basis: 1,

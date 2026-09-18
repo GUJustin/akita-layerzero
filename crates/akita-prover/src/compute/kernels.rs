@@ -97,20 +97,20 @@ where
 
 /// Batched decompose-fold kernel over a borrowed opening-batch view `S`.
 ///
-/// Implementations return the final aggregate witness. A backend without a
-/// fused path is responsible for folding its source polynomials individually
-/// and aggregating them before returning.
+/// Implementations return one aggregate witness per requested block window. A
+/// backend without a fused path folds its source polynomials individually and
+/// aggregates them within each window before returning.
 pub trait OpeningBatchKernel<S, F, const D: usize>: ComputeBackendSetup<F>
 where
     F: Field + CanonicalEncoding,
 {
-    /// Batched decompose-fold at one opening point.
+    /// Batched decompose-fold at one opening point, in chunk order.
     fn decompose_fold_batch(
         &self,
         prepared: Option<&Self::PreparedSetup>,
         source: S,
         plan: DecomposeFoldBatchPlan<'_>,
-    ) -> Result<DecomposeFoldWitness<F>, AkitaError>;
+    ) -> Result<Vec<DecomposeFoldWitness<F>>, AkitaError>;
 }
 
 /// Tensor projection kernel over a borrowed tensor view `S` for opening at an
