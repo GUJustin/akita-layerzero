@@ -20,7 +20,7 @@ struct AdmittedProverInput<'opening, 'schedule, E: Clone, P, F: Field, S> {
     schedule: &'schedule FoldSchedule,
 }
 
-impl<'stack, Stacks: ?Sized> ProverExecutor<'stack, Stacks> {
+impl<'stack, Stacks: ?Sized, D> ProverExecutor<'stack, Stacks, D> {
     fn validate_params<'opening, 'schedule, Cfg, P, S, O, TS, R, SP>(
         &self,
         expanded: &AkitaExpandedSetup<Cfg::Field>,
@@ -208,7 +208,284 @@ where
     <TS as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'a,
     <R as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'a,
 {
-    let executor = ProverExecutor { stacks };
+    batched_prove_with_stage2::<Cfg, T, P, S, O, TS, R, SP, _>(
+        expanded,
+        prefix_slots,
+        schedules,
+        stacks,
+        opening,
+        transcript,
+        basis,
+        CpuStage2,
+    )
+}
+
+#[cfg(feature = "resident-stage2-owned")]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn batched_prove_resident_stage2<'a, Cfg, T, P, S, O, TS, R, SP>(
+    expanded: &Arc<AkitaExpandedSetup<jolt_field::Prime64Offset59>>,
+    prefix_slots: &SetupPrefixProverRegistry<jolt_field::Prime64Offset59>,
+    schedules: &TrustedScheduleCatalog<Cfg>,
+    stacks: &'a impl LevelProveStacks<
+        'a,
+        jolt_field::Prime64Offset59,
+        Opening = O,
+        Tensor = TS,
+        RingSwitch = R,
+        CommitmentStatePolicy = SP,
+    >,
+    opening: SelectedProverOpeningData<
+        'a,
+        jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        P,
+        jolt_field::Prime64Offset59,
+        S,
+    >,
+    transcript: &mut T,
+    basis: BasisMode,
+) -> Result<
+    AkitaBatchedProof<jolt_field::Prime64Offset59, jolt_field::Ext2<jolt_field::Prime64Offset59>>,
+    AkitaError,
+>
+where
+    Cfg: CommitmentConfig<
+        Field = jolt_field::Prime64Offset59,
+        ExtField = jolt_field::Ext2<jolt_field::Prime64Offset59>,
+    >,
+    jolt_field::Prime64Offset59: Field
+        + CanonicalEncoding
+        + akita_serialization::AkitaSerialize
+        + Unreduced
+        + Field
+        + PseudoMersenne,
+    jolt_field::Ext2<jolt_field::Prime64Offset59>:
+        FpExtEncoding<jolt_field::Prime64Offset59> + MulBaseUnreduced<jolt_field::Prime64Offset59>,
+    jolt_field::Ext2<jolt_field::Prime64Offset59>: FpExtEncoding<jolt_field::Prime64Offset59>
+        + ExtField<jolt_field::Prime64Offset59>
+        + ExtField<jolt_field::Prime64Offset59>
+        + Unreduced
+        + Fold
+        + Ring
+        + AkitaSerialize,
+    T: Transcript<jolt_field::Prime64Offset59> + TranscriptChallengePreview,
+    jolt_field::Prime64Offset59: Ring + 'static,
+    <jolt_field::Prime64Offset59 as Unreduced>::Wide:
+        From<jolt_field::Prime64Offset59> + AdditiveGroup,
+    P: PreparedGroupProveOps<
+        jolt_field::Prime64Offset59,
+        jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        O,
+    >,
+    S: InnerRelationState<jolt_field::Prime64Offset59>
+        + OuterCompressionState<jolt_field::Prime64Offset59>,
+    SP: CommitmentStatePolicy<jolt_field::Prime64Offset59> + 'a,
+    SP::State: InnerRelationState<jolt_field::Prime64Offset59>
+        + OuterCompressionState<jolt_field::Prime64Offset59>,
+    O: ComputeBackendSetup<jolt_field::Prime64Offset59>
+        + RuntimeOpeningProveBackendFor<
+            jolt_field::Prime64Offset59,
+            RecursiveFoldSource<jolt_field::Prime64Offset59>,
+        > + RuntimeCoefficientPackingBackendFor<
+            jolt_field::Prime64Offset59,
+            RecursiveFoldSource<jolt_field::Prime64Offset59>,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        > + SuffixOpeningProveBackend<jolt_field::Prime64Offset59>
+        + DigitRowsComputeBackend<jolt_field::Prime64Offset59>
+        + 'a,
+    TS: ComputeBackendSetup<jolt_field::Prime64Offset59>
+        + RuntimeTensorBackendFor<
+            jolt_field::Prime64Offset59,
+            RecursiveFoldSource<jolt_field::Prime64Offset59>,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        > + SuffixTensorProveBackend<
+            jolt_field::Prime64Offset59,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        > + 'a,
+    R: ComputeBackendSetup<jolt_field::Prime64Offset59>
+        + RuntimeRingSwitchProveBackend<jolt_field::Prime64Offset59>
+        + DigitRowsComputeBackend<jolt_field::Prime64Offset59>
+        + 'a,
+    <O as ComputeBackendSetup<jolt_field::Prime64Offset59>>::PreparedSetup: 'a,
+    <TS as ComputeBackendSetup<jolt_field::Prime64Offset59>>::PreparedSetup: 'a,
+    <R as ComputeBackendSetup<jolt_field::Prime64Offset59>>::PreparedSetup: 'a,
+{
+    batched_prove_with_stage2::<Cfg, T, P, S, O, TS, R, SP, _>(
+        expanded,
+        prefix_slots,
+        schedules,
+        stacks,
+        opening,
+        transcript,
+        basis,
+        super::stage2_executor::ResidentStage2,
+    )
+}
+
+#[cfg(feature = "resident-stage2-owned")]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn batched_prove_hybrid_stage2<'a, Cfg, T, P, S, O, TS, R, SP>(
+    expanded: &Arc<AkitaExpandedSetup<jolt_field::Prime64Offset59>>,
+    prefix_slots: &SetupPrefixProverRegistry<jolt_field::Prime64Offset59>,
+    schedules: &TrustedScheduleCatalog<Cfg>,
+    stacks: &'a impl LevelProveStacks<
+        'a,
+        jolt_field::Prime64Offset59,
+        Opening = O,
+        Tensor = TS,
+        RingSwitch = R,
+        CommitmentStatePolicy = SP,
+    >,
+    opening: SelectedProverOpeningData<
+        'a,
+        jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        P,
+        jolt_field::Prime64Offset59,
+        S,
+    >,
+    transcript: &mut T,
+    basis: BasisMode,
+) -> Result<
+    AkitaBatchedProof<jolt_field::Prime64Offset59, jolt_field::Ext2<jolt_field::Prime64Offset59>>,
+    AkitaError,
+>
+where
+    Cfg: CommitmentConfig<
+        Field = jolt_field::Prime64Offset59,
+        ExtField = jolt_field::Ext2<jolt_field::Prime64Offset59>,
+    >,
+    jolt_field::Prime64Offset59: Field
+        + CanonicalEncoding
+        + akita_serialization::AkitaSerialize
+        + Unreduced
+        + Field
+        + PseudoMersenne,
+    jolt_field::Ext2<jolt_field::Prime64Offset59>:
+        FpExtEncoding<jolt_field::Prime64Offset59> + MulBaseUnreduced<jolt_field::Prime64Offset59>,
+    jolt_field::Ext2<jolt_field::Prime64Offset59>: FpExtEncoding<jolt_field::Prime64Offset59>
+        + ExtField<jolt_field::Prime64Offset59>
+        + ExtField<jolt_field::Prime64Offset59>
+        + Unreduced
+        + Fold
+        + Ring
+        + AkitaSerialize,
+    T: Transcript<jolt_field::Prime64Offset59> + TranscriptChallengePreview,
+    jolt_field::Prime64Offset59: Ring + 'static,
+    <jolt_field::Prime64Offset59 as Unreduced>::Wide:
+        From<jolt_field::Prime64Offset59> + AdditiveGroup,
+    P: PreparedGroupProveOps<
+        jolt_field::Prime64Offset59,
+        jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        O,
+    >,
+    S: InnerRelationState<jolt_field::Prime64Offset59>
+        + OuterCompressionState<jolt_field::Prime64Offset59>,
+    SP: CommitmentStatePolicy<jolt_field::Prime64Offset59> + 'a,
+    SP::State: InnerRelationState<jolt_field::Prime64Offset59>
+        + OuterCompressionState<jolt_field::Prime64Offset59>,
+    O: ComputeBackendSetup<jolt_field::Prime64Offset59>
+        + RuntimeOpeningProveBackendFor<
+            jolt_field::Prime64Offset59,
+            RecursiveFoldSource<jolt_field::Prime64Offset59>,
+        > + RuntimeCoefficientPackingBackendFor<
+            jolt_field::Prime64Offset59,
+            RecursiveFoldSource<jolt_field::Prime64Offset59>,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        > + SuffixOpeningProveBackend<jolt_field::Prime64Offset59>
+        + DigitRowsComputeBackend<jolt_field::Prime64Offset59>
+        + 'a,
+    TS: ComputeBackendSetup<jolt_field::Prime64Offset59>
+        + RuntimeTensorBackendFor<
+            jolt_field::Prime64Offset59,
+            RecursiveFoldSource<jolt_field::Prime64Offset59>,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        > + SuffixTensorProveBackend<
+            jolt_field::Prime64Offset59,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        > + 'a,
+    R: ComputeBackendSetup<jolt_field::Prime64Offset59>
+        + RuntimeRingSwitchProveBackend<jolt_field::Prime64Offset59>
+        + DigitRowsComputeBackend<jolt_field::Prime64Offset59>
+        + 'a,
+    <O as ComputeBackendSetup<jolt_field::Prime64Offset59>>::PreparedSetup: 'a,
+    <TS as ComputeBackendSetup<jolt_field::Prime64Offset59>>::PreparedSetup: 'a,
+    <R as ComputeBackendSetup<jolt_field::Prime64Offset59>>::PreparedSetup: 'a,
+{
+    batched_prove_with_stage2::<Cfg, T, P, S, O, TS, R, SP, _>(
+        expanded,
+        prefix_slots,
+        schedules,
+        stacks,
+        opening,
+        transcript,
+        basis,
+        super::stage2_executor::HybridStage2,
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn batched_prove_with_stage2<'a, Cfg, T, P, S, O, TS, R, SP, D>(
+    expanded: &Arc<AkitaExpandedSetup<Cfg::Field>>,
+    prefix_slots: &SetupPrefixProverRegistry<Cfg::Field>,
+    schedules: &TrustedScheduleCatalog<Cfg>,
+    stacks: &'a impl LevelProveStacks<
+        'a,
+        Cfg::Field,
+        Opening = O,
+        Tensor = TS,
+        RingSwitch = R,
+        CommitmentStatePolicy = SP,
+    >,
+    opening: SelectedProverOpeningData<'a, Cfg::ExtField, P, Cfg::Field, S>,
+    transcript: &mut T,
+    basis: BasisMode,
+    stage2: D,
+) -> Result<AkitaBatchedProof<Cfg::Field, Cfg::ExtField>, AkitaError>
+where
+    D: Stage2Executor<Cfg::Field, Cfg::ExtField>,
+    Cfg: CommitmentConfig,
+    Cfg::Field: Field
+        + CanonicalEncoding
+        + akita_serialization::AkitaSerialize
+        + Unreduced
+        + Field
+        + PseudoMersenne,
+    Cfg::ExtField: FpExtEncoding<Cfg::Field> + MulBaseUnreduced<Cfg::Field>,
+    Cfg::ExtField: FpExtEncoding<Cfg::Field>
+        + ExtField<Cfg::Field>
+        + ExtField<Cfg::Field>
+        + Unreduced
+        + Fold
+        + Ring
+        + AkitaSerialize,
+    T: Transcript<Cfg::Field> + TranscriptChallengePreview,
+    Cfg::Field: Ring + 'static,
+    <Cfg::Field as Unreduced>::Wide: From<Cfg::Field> + AdditiveGroup,
+    P: PreparedGroupProveOps<Cfg::Field, Cfg::ExtField, O>,
+    S: InnerRelationState<Cfg::Field> + OuterCompressionState<Cfg::Field>,
+    SP: CommitmentStatePolicy<Cfg::Field> + 'a,
+    SP::State: InnerRelationState<Cfg::Field> + OuterCompressionState<Cfg::Field>,
+    O: ComputeBackendSetup<Cfg::Field>
+        + RuntimeOpeningProveBackendFor<Cfg::Field, RecursiveFoldSource<Cfg::Field>>
+        + RuntimeCoefficientPackingBackendFor<
+            Cfg::Field,
+            RecursiveFoldSource<Cfg::Field>,
+            Cfg::ExtField,
+        > + SuffixOpeningProveBackend<Cfg::Field>
+        + DigitRowsComputeBackend<Cfg::Field>
+        + 'a,
+    TS: ComputeBackendSetup<Cfg::Field>
+        + RuntimeTensorBackendFor<Cfg::Field, RecursiveFoldSource<Cfg::Field>, Cfg::ExtField>
+        + SuffixTensorProveBackend<Cfg::Field, Cfg::ExtField>
+        + 'a,
+    R: ComputeBackendSetup<Cfg::Field>
+        + RuntimeRingSwitchProveBackend<Cfg::Field>
+        + DigitRowsComputeBackend<Cfg::Field>
+        + 'a,
+    <O as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'a,
+    <TS as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'a,
+    <R as ComputeBackendSetup<Cfg::Field>>::PreparedSetup: 'a,
+{
+    let executor = ProverExecutor { stacks, stage2 };
     let admitted = executor.validate_params::<Cfg, P, S, O, TS, R, SP>(
         expanded.as_ref(),
         schedules,

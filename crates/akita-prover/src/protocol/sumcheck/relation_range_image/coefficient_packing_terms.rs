@@ -32,4 +32,4 @@ pub(in crate::protocol) fn prepare_coefficient_packing_linear_terms<E: Field>(
 
 #[cfg(test)]
 #[path = "coefficient_packing_terms_tests.rs"]
-mod tests;
+pub(super) mod tests;

@@ -543,7 +543,8 @@ where
 /// sumcheck prover fails.
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-pub(in crate::protocol::core) fn prove_fold<'stack, F, E, T, O, TS, R, SP, Cfg>(
+pub(in crate::protocol::core) fn prove_fold<'stack, F, E, T, O, TS, R, SP, Cfg, D>(
+    stage2: &D,
     expanded: &Arc<AkitaExpandedSetup<F>>,
     prefix_slots: &SetupPrefixProverRegistry<F>,
     stack: &'stack ProverComputeStack<'stack, F, O, TS, R, SP>,
@@ -556,6 +557,7 @@ pub(in crate::protocol::core) fn prove_fold<'stack, F, E, T, O, TS, R, SP, Cfg>(
     prepared_fold: PreparedFold<F, E>,
 ) -> Result<ProveLevelOutput<F, E, SP::State>, AkitaError>
 where
+    D: Stage2Executor<F, E>,
     F: Field
         + CanonicalEncoding
         + Field
@@ -680,7 +682,8 @@ where
         proof: stage2_sumcheck_proof,
         challenges: sumcheck_challenges,
         prover: stage2_prover,
-    } = prove_stage2::<F, E, T>(
+    } = prove_stage2::<F, E, T, D>(
+        stage2,
         level,
         transcript,
         batching_coeff,

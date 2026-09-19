@@ -223,6 +223,185 @@ where
         Ok(proof)
     }
 
+    /// Explicit resident Stage2 route; admission/native errors abort without CPU replay.
+    #[cfg(feature = "resident-stage2-owned")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn batched_prove_resident_stage2<'a, T, P, B, SP>(
+        &self,
+        setup: &AkitaProverSetup<jolt_field::Prime64Offset59>,
+        opening: SelectedProverOpeningData<
+            'a,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            P,
+            jolt_field::Prime64Offset59,
+            impl InnerRelationState<jolt_field::Prime64Offset59>
+                + OuterCompressionState<jolt_field::Prime64Offset59>,
+        >,
+        stacks: &'a impl LevelProveStacks<
+            'a,
+            jolt_field::Prime64Offset59,
+            Opening = B,
+            Tensor = B,
+            RingSwitch = B,
+            CommitmentStatePolicy = SP,
+        >,
+        transcript: &mut T,
+        basis: BasisMode,
+    ) -> Result<
+        AkitaBatchedProof<
+            jolt_field::Prime64Offset59,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        >,
+        AkitaError,
+    >
+    where
+        Cfg: CommitmentConfig<
+            Field = jolt_field::Prime64Offset59,
+            ExtField = jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        >,
+        T: Transcript<jolt_field::Prime64Offset59> + TranscriptChallengePreview,
+        jolt_field::Prime64Offset59: Ring + Unreduced + Field + 'static,
+        <jolt_field::Prime64Offset59 as Unreduced>::Wide:
+            From<jolt_field::Prime64Offset59> + AdditiveGroup,
+        P: PreparedGroupProveOps<
+            jolt_field::Prime64Offset59,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            B,
+        >,
+        B: ComputeBackendSetup<jolt_field::Prime64Offset59>
+            + RuntimeOpeningProveBackendFor<
+                jolt_field::Prime64Offset59,
+                RecursiveFoldSource<jolt_field::Prime64Offset59>,
+            > + RuntimeCoefficientPackingBackendFor<
+                jolt_field::Prime64Offset59,
+                RecursiveFoldSource<jolt_field::Prime64Offset59>,
+                jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            > + SuffixOpeningProveBackend<jolt_field::Prime64Offset59>
+            + DigitRowsComputeBackend<jolt_field::Prime64Offset59>
+            + RuntimeTensorBackendFor<
+                jolt_field::Prime64Offset59,
+                RecursiveFoldSource<jolt_field::Prime64Offset59>,
+                jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            > + SuffixTensorProveBackend<
+                jolt_field::Prime64Offset59,
+                jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            > + RuntimeRingSwitchProveBackend<jolt_field::Prime64Offset59>
+            + 'a,
+        <B as ComputeBackendSetup<jolt_field::Prime64Offset59>>::PreparedSetup: 'a,
+        SP: CommitmentStatePolicy<jolt_field::Prime64Offset59> + 'a,
+        SP::State: InnerRelationState<jolt_field::Prime64Offset59>
+            + OuterCompressionState<jolt_field::Prime64Offset59>,
+    {
+        let t_prove_total = Instant::now();
+        let proof = akita_prover::batched_prove_resident_stage2::<Cfg, T, P, _, B, B, B, SP>(
+            &setup.expanded,
+            &setup.prefix_slots,
+            &self.schedules,
+            stacks,
+            opening,
+            transcript,
+            basis,
+        )?;
+
+        tracing::info!(
+            levels = proof.num_fold_levels(),
+            elapsed_s = t_prove_total.elapsed().as_secs_f64(),
+            "akita batched prove complete"
+        );
+
+        Ok(proof)
+    }
+
+    /// Explicit hybrid Stage2 route: QuotientFactored runs resident; ReducedDense runs CPU.
+    /// Selection precedes claim absorption; admission/native errors never retry on CPU.
+    #[cfg(feature = "resident-stage2-owned")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn batched_prove_hybrid_stage2<'a, T, P, B, SP>(
+        &self,
+        setup: &AkitaProverSetup<jolt_field::Prime64Offset59>,
+        opening: SelectedProverOpeningData<
+            'a,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            P,
+            jolt_field::Prime64Offset59,
+            impl InnerRelationState<jolt_field::Prime64Offset59>
+                + OuterCompressionState<jolt_field::Prime64Offset59>,
+        >,
+        stacks: &'a impl LevelProveStacks<
+            'a,
+            jolt_field::Prime64Offset59,
+            Opening = B,
+            Tensor = B,
+            RingSwitch = B,
+            CommitmentStatePolicy = SP,
+        >,
+        transcript: &mut T,
+        basis: BasisMode,
+    ) -> Result<
+        AkitaBatchedProof<
+            jolt_field::Prime64Offset59,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        >,
+        AkitaError,
+    >
+    where
+        Cfg: CommitmentConfig<
+            Field = jolt_field::Prime64Offset59,
+            ExtField = jolt_field::Ext2<jolt_field::Prime64Offset59>,
+        >,
+        T: Transcript<jolt_field::Prime64Offset59> + TranscriptChallengePreview,
+        jolt_field::Prime64Offset59: Ring + Unreduced + Field + 'static,
+        <jolt_field::Prime64Offset59 as Unreduced>::Wide:
+            From<jolt_field::Prime64Offset59> + AdditiveGroup,
+        P: PreparedGroupProveOps<
+            jolt_field::Prime64Offset59,
+            jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            B,
+        >,
+        B: ComputeBackendSetup<jolt_field::Prime64Offset59>
+            + RuntimeOpeningProveBackendFor<
+                jolt_field::Prime64Offset59,
+                RecursiveFoldSource<jolt_field::Prime64Offset59>,
+            > + RuntimeCoefficientPackingBackendFor<
+                jolt_field::Prime64Offset59,
+                RecursiveFoldSource<jolt_field::Prime64Offset59>,
+                jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            > + SuffixOpeningProveBackend<jolt_field::Prime64Offset59>
+            + DigitRowsComputeBackend<jolt_field::Prime64Offset59>
+            + RuntimeTensorBackendFor<
+                jolt_field::Prime64Offset59,
+                RecursiveFoldSource<jolt_field::Prime64Offset59>,
+                jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            > + SuffixTensorProveBackend<
+                jolt_field::Prime64Offset59,
+                jolt_field::Ext2<jolt_field::Prime64Offset59>,
+            > + RuntimeRingSwitchProveBackend<jolt_field::Prime64Offset59>
+            + 'a,
+        <B as ComputeBackendSetup<jolt_field::Prime64Offset59>>::PreparedSetup: 'a,
+        SP: CommitmentStatePolicy<jolt_field::Prime64Offset59> + 'a,
+        SP::State: InnerRelationState<jolt_field::Prime64Offset59>
+            + OuterCompressionState<jolt_field::Prime64Offset59>,
+    {
+        let t_prove_total = Instant::now();
+        let proof = akita_prover::batched_prove_hybrid_stage2::<Cfg, T, P, _, B, B, B, SP>(
+            &setup.expanded,
+            &setup.prefix_slots,
+            &self.schedules,
+            stacks,
+            opening,
+            transcript,
+            basis,
+        )?;
+
+        tracing::info!(
+            levels = proof.num_fold_levels(),
+            elapsed_s = t_prove_total.elapsed().as_secs_f64(),
+            "akita batched prove complete"
+        );
+
+        Ok(proof)
+    }
+
     /// Verify a fused batched opening proof over ordered commitment groups.
     ///
     /// # Errors

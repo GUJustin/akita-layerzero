@@ -296,21 +296,30 @@ pub(crate) use prepared_linear_lane::PreparedLinearLane;
 pub(crate) use weight_oracle::{DenseRelationWeights, RelationWeightOracle};
 
 impl<E: Field + Ring + Unreduced> RelationRangeImageProver<E> {
-    #[cfg(test)]
+    /// Representation supplied by the trusted relation plan; never infer a factorization.
+    #[cfg(feature = "resident-stage2-owned")]
+    pub(crate) fn is_quotient_factored(&self) -> bool {
+        matches!(
+            &self.relation_state,
+            RelationRoundState::QuotientFactored { .. }
+        )
+    }
+
+    #[cfg(any(test, feature = "resident-stage2-owned"))]
     #[inline]
     fn common_alpha_factor(&self) -> Option<&[E]> {
         self.quotient_weights()
             .map(RelationWeightFactorization::common_alpha_factor)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "resident-stage2-owned"))]
     #[inline]
     fn relation_lane_weights(&self) -> Option<&[E]> {
         self.quotient_weights()
             .map(RelationWeightFactorization::relation_lane_weights)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "resident-stage2-owned"))]
     #[inline]
     fn quotient_weights(&self) -> Option<&RelationWeightFactorization<E>> {
         match &self.relation_state {
@@ -319,7 +328,7 @@ impl<E: Field + Ring + Unreduced> RelationRangeImageProver<E> {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "resident-stage2-owned"))]
     fn replace_common_alpha_factor(&mut self, replacement: Vec<E>) {
         if let RelationRoundState::QuotientFactored { weights, .. } = &mut self.relation_state {
             *weights.components_mut().0 = replacement;
@@ -379,3 +388,12 @@ impl<E: Field + Ring + Unreduced> RelationRangeImageProver<E> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "resident-stage2-owned")]
+pub(crate) mod resident_owned;
+
+#[cfg(all(test, feature = "resident-stage2-owned"))]
+mod resident_port_tests;
+
+#[cfg(all(test, feature = "resident-stage2-owned"))]
+mod resident_branch_tests;

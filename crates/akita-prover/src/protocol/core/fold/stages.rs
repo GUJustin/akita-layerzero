@@ -100,7 +100,8 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn prove_stage2<F, E, T>(
+pub(super) fn prove_stage2<F, E, T, D>(
+    executor: &D,
     level: usize,
     transcript: &mut T,
     batching_coeff: E,
@@ -115,6 +116,7 @@ pub(super) fn prove_stage2<F, E, T>(
     plan: RelationRangeImagePlan,
 ) -> Result<Stage2ProveOutput<E>, AkitaError>
 where
+    D: Stage2Executor<F, E>,
     F: Field + CanonicalEncoding + akita_serialization::AkitaSerialize,
     E: ExtField<F> + Unreduced + Fold + Ring + AkitaSerialize,
     T: akita_types::ProverTranscriptGrinding<F>,
@@ -186,7 +188,16 @@ where
         - additional_relation_terms
             .as_ref()
             .map_or_else(E::zero, AdditionalRelationTerms::input_claim);
-    let mut stage2_prover = RelationRangeImageProver::new(
+    let context = Stage2Context {
+        level,
+        basis: plan.digit_range_plan().basis(),
+        columns: geometry.relation_coefficient_block_len(),
+        lanes: live_relation_lane_count,
+        domain: domain_len,
+        compression_layers: plan.witness_layout().compression_layers().len(),
+        negative_binary_intervals: binary_intervals.len(),
+    };
+    let stage2_prover = RelationRangeImageProver::new(
         batching_coeff,
         rs.w_evals_compact,
         stage1_point,
@@ -209,8 +220,8 @@ where
     let level = u32::try_from(level)
         .map_err(|_| AkitaError::InvalidSetup("fold level exceeds u32".into()))?;
     let mut round = 0u32;
-    let (stage2_sumcheck_proof, sumcheck_challenges, final_claim) =
-        prove_sumcheck::<F, T, E, _, _>(&mut stage2_prover, transcript, |tr| {
+    let ((stage2_sumcheck_proof, sumcheck_challenges, final_claim), stage2_prover) = executor
+        .prove(stage2_prover, transcript, context, |tr| {
             let challenge = akita_types::sample_grinded_sumcheck_challenge::<F, E, T>(
                 tr,
                 akita_types::SumcheckProtocol::Stage2,

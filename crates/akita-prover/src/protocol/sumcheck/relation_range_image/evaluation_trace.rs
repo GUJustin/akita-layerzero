@@ -924,3 +924,7 @@ impl<E: Field> PreparedProverLinearTerms<E> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "resident-stage2-owned")]
+#[path = "resident_stage2_descriptors.rs"]
+pub(crate) mod resident_stage2_descriptors;

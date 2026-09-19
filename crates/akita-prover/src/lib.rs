@@ -349,3 +349,12 @@ impl<F: Field> CommitInnerWitness<F> {
         self.inner_rows
     }
 }
+
+#[cfg(feature = "resident-stage2-observer")]
+pub mod stage2_observer;
+
+#[cfg(feature = "resident-stage2-owned")]
+pub use protocol::batched_prove_resident_stage2;
+
+#[cfg(feature = "resident-stage2-owned")]
+pub use protocol::batched_prove_hybrid_stage2;

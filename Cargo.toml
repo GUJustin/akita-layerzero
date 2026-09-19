@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/akita-stage2-owned-adapter-prototype",
   "crates/akita-algebra",
   "crates/akita-challenges",
   "crates/akita-config",

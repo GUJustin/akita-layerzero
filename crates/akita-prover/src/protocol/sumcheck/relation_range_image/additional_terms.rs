@@ -597,3 +597,7 @@ mod tests {
         .is_err());
     }
 }
+
+#[cfg(feature = "resident-stage2-owned")]
+#[path = "resident_stage2_additional.rs"]
+mod resident_additional;

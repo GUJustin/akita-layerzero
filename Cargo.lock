@@ -145,6 +145,7 @@ dependencies = [
  "akita-config",
  "akita-error",
  "akita-serialization",
+ "akita-stage2-owned-adapter-prototype",
  "akita-sumcheck",
  "akita-transcript",
  "akita-types",
@@ -205,6 +206,10 @@ dependencies = [
  "sha3 0.12.0",
  "thiserror",
 ]
+
+[[package]]
+name = "akita-stage2-owned-adapter-prototype"
+version = "0.1.0"
 
 [[package]]
 name = "akita-sumcheck"

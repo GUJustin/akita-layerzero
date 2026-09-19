@@ -592,3 +592,19 @@ fn recursive_packing_phases_share_one_relation_authority() {
         semantics.stage2_terms().scalar_claim_weight() * authenticated_opening,
     );
 }
+
+#[cfg(feature = "resident-stage2-owned")]
+pub(in crate::protocol::sumcheck::relation_range_image) fn resident_packing_fixture(
+    basis: BasisMode,
+) -> (PreparedProverLinearTerms<E>, usize, usize) {
+    let fixture = fixture_for_basis(basis);
+    let semantics = &fixture.batch.groups()[0];
+    let coefficients = semantics.stage2_terms().relation_coefficient_block_len();
+    let lanes = semantics.stage2_terms().physical_field_len() / coefficients;
+    let prepared = prepare_coefficient_packing_linear_terms(semantics.clone(), E::zero())
+        .unwrap()
+        .linear_terms;
+    assert_eq!(prepared.materialize_dense(), materialize_shared(semantics));
+    assert_eq!(prepared.source_count(), 2);
+    (prepared, lanes, coefficients)
+}

@@ -5,7 +5,7 @@ use crate::compute::{
 };
 use jolt_field::AdditiveGroup;
 
-impl<'stack, Stacks: ?Sized> ProverExecutor<'stack, Stacks> {
+impl<'stack, Stacks: ?Sized, D> ProverExecutor<'stack, Stacks, D> {
     /// Prove the folded-root proof payload for an intermediate root.
     ///
     /// The caller owns schedule/config selection and passes the validated schedule
@@ -32,6 +32,7 @@ impl<'stack, Stacks: ?Sized> ProverExecutor<'stack, Stacks> {
         basis: BasisMode,
     ) -> Result<ProveLevelOutput<F, E, SP::State>, AkitaError>
     where
+        D: Stage2Executor<F, E>,
         F: Field
             + CanonicalEncoding
             + akita_serialization::AkitaSerialize
@@ -91,7 +92,8 @@ impl<'stack, Stacks: ?Sized> ProverExecutor<'stack, Stacks> {
         )
         .map_err(|err| AkitaError::InvalidInput(format!("prepare root failed: {err:?}")))?;
 
-        prove_fold::<F, E, T, O, TS, R, SP, Cfg>(
+        prove_fold::<F, E, T, O, TS, R, SP, Cfg, D>(
+            &self.stage2,
             expanded,
             prefix_slots,
             stack,

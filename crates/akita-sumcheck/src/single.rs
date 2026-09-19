@@ -58,10 +58,12 @@ where
     Ok((claim, challenges))
 }
 
-/// Prove one standard sumcheck instance.
+/// Prove one local fallible instance, without retry or transcript rollback.
+/// Compute failure absorbs no round message; challenge sampling and ingestion
+/// failures retain the already absorbed message. Finalization failure returns no proof.
 #[tracing::instrument(skip_all, name = "prove_sumcheck")]
 #[inline(never)]
-pub fn prove_sumcheck<F, T, E, S, P>(
+pub fn prove_fallible_sumcheck<F, T, E, S, P>(
     prover: &mut P,
     transcript: &mut T,
     mut sample_challenge: S,
@@ -71,7 +73,7 @@ where
     T: Transcript<F>,
     E: Field + AkitaSerialize,
     S: FnMut(&mut T) -> Result<E, AkitaError>,
-    P: SumcheckInstanceProver<E> + ?Sized,
+    P: crate::FallibleSumcheckInstanceProver<E> + ?Sized,
 {
     let num_rounds = prover.num_rounds();
     let mut claim = prover.input_claim();
@@ -94,7 +96,7 @@ where
         .entered();
         let poly = {
             let _span = tracing::info_span!("sumcheck_round_univariate").entered();
-            prover.compute_round_univariate(round, claim)
+            prover.compute_round_univariate(round, claim)?
         };
         debug_assert_eq!(
             poly.evaluate(&E::zero()) + poly.evaluate(&E::one()),
@@ -114,13 +116,58 @@ where
         claim = compressed.eval_from_hint(&claim, &challenge);
         {
             let _span = tracing::info_span!("sumcheck_round_fold").entered();
-            prover.ingest_challenge(round, challenge);
+            prover.ingest_challenge(round, challenge)?;
         }
         challenges.push(challenge);
         round_polys.push(compressed);
     }
-    prover.finalize();
+    prover.finalize()?;
     Ok((SumcheckProof { round_polys }, challenges, claim))
+}
+
+/// Original infallible API using the canonical fallible transcript loop.
+pub fn prove_sumcheck<F, T, E, S, P>(
+    prover: &mut P,
+    transcript: &mut T,
+    sample_challenge: S,
+) -> Result<(SumcheckProof<E>, Vec<E>, E), AkitaError>
+where
+    F: Field + CanonicalEncoding,
+    T: Transcript<F>,
+    E: Field + AkitaSerialize,
+    S: FnMut(&mut T) -> Result<E, AkitaError>,
+    P: SumcheckInstanceProver<E> + ?Sized,
+{
+    prove_fallible_sumcheck::<F, T, E, S, _>(&mut Infallible(prover), transcript, sample_challenge)
+}
+struct Infallible<'a, P: ?Sized>(&'a mut P);
+impl<E: Field, P: SumcheckInstanceProver<E> + ?Sized> crate::FallibleSumcheckInstanceProver<E>
+    for Infallible<'_, P>
+{
+    fn num_rounds(&self) -> usize {
+        self.0.num_rounds()
+    }
+    fn degree_bound(&self) -> usize {
+        self.0.degree_bound()
+    }
+    fn input_claim(&self) -> E {
+        self.0.input_claim()
+    }
+    fn compute_round_univariate(
+        &mut self,
+        round: usize,
+        claim: E,
+    ) -> Result<crate::UniPoly<E>, AkitaError> {
+        Ok(self.0.compute_round_univariate(round, claim))
+    }
+    fn ingest_challenge(&mut self, round: usize, challenge: E) -> Result<(), AkitaError> {
+        self.0.ingest_challenge(round, challenge);
+        Ok(())
+    }
+    fn finalize(&mut self) -> Result<(), AkitaError> {
+        self.0.finalize();
+        Ok(())
+    }
 }
 
 /// Validate and replay standard sumcheck rounds without a terminal oracle check.
@@ -291,3 +338,10 @@ where
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "single/fallible_tests.rs"]
+mod fallible_tests;
+#[cfg(test)]
+#[path = "single/standard_original_test_oracle.rs"]
+mod standard_original_test_oracle;

@@ -19,3 +19,9 @@ pub use ring_switch::{
     RelationWeightContribution, RelationWeightEvent, RelationWeightEventInputs,
     RelationWeightEvents, RelationWeightFactorization, RingSwitchOutput,
 };
+
+#[cfg(feature = "resident-stage2-owned")]
+pub use core::batched_prove_resident_stage2;
+
+#[cfg(feature = "resident-stage2-owned")]
+pub use core::batched_prove_hybrid_stage2;

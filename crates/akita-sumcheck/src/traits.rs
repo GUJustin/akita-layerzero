@@ -42,6 +42,32 @@ pub trait SumcheckInstanceProver<E: Field>: Send + Sync {
     fn finalize(&mut self) {}
 }
 
+/// Synchronous, fallible prover operations for a single sumcheck instance.
+///
+/// No `Send` or `Sync` bound is imposed: an implementation may own a thread-local
+/// device session. Static admission must finish before invoking the driver.
+/// Errors abort the proof without replay or transcript rollback; implementations
+/// remain responsible for poisoning/releasing failed device state.
+pub trait FallibleSumcheckInstanceProver<E: Field> {
+    /// Number of variables bound by the protocol.
+    fn num_rounds(&self) -> usize;
+    /// Maximum allowed round-polynomial degree.
+    fn degree_bound(&self) -> usize;
+    /// Initial claimed sum, absorbed before the first round.
+    fn input_claim(&self) -> E;
+    /// Compute the next polynomial, before it is absorbed or its challenge sampled.
+    fn compute_round_univariate(
+        &mut self,
+        round: usize,
+        previous_claim: E,
+    ) -> Result<UniPoly<E>, AkitaError>;
+    /// Fold state after the round polynomial and sampled challenge enter the transcript.
+    fn ingest_challenge(&mut self, round: usize, challenge: E) -> Result<(), AkitaError>;
+    /// Complete the instance after every challenge was successfully ingested.
+    /// A failure here also aborts proof construction.
+    fn finalize(&mut self) -> Result<(), AkitaError>;
+}
+
 /// Verifier-side sumcheck instance interface.
 ///
 /// Implementations provide the initial claim and the oracle evaluation at the

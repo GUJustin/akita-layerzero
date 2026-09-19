@@ -44,7 +44,7 @@ impl<F: Field, E: Field, S> SuffixProverState<F, E, S> {
     }
 }
 
-impl<'stack, Stacks: ?Sized> ProverExecutor<'stack, Stacks> {
+impl<'stack, Stacks: ?Sized, D> ProverExecutor<'stack, Stacks, D> {
     /// Drive the recursive fold suffix (after the root) under config `Cfg`.
     ///
     /// The selected planner `schedule` is authoritative: it determines the fold
@@ -66,6 +66,7 @@ impl<'stack, Stacks: ?Sized> ProverExecutor<'stack, Stacks> {
         schedule: &FoldSchedule,
     ) -> Result<RecursiveSuffixOutcome<Cfg::Field, Cfg::ExtField>, AkitaError>
     where
+        D: Stage2Executor<Cfg::Field, Cfg::ExtField>,
         Cfg: CommitmentConfig,
         Cfg::Field: Field
             + CanonicalEncoding
@@ -169,24 +170,26 @@ impl<'stack, Stacks: ?Sized> ProverExecutor<'stack, Stacks> {
                     ))
                 })?
             };
-            let out = super::fold::prove_fold::<Cfg::Field, Cfg::ExtField, T, O, TS, R, SP, Cfg>(
-                expanded,
-                prefix_slots,
-                self.stacks.prove_stack_at_level(level),
-                transcript,
-                level,
-                level_params,
-                next_params,
-                step.output_witness_len,
-                next_binding,
-                prepared_fold,
-            )
-            .map_err(|err| {
-                AkitaError::InvalidInput(format!(
-                    "suffix fold level {level} d_a={} failed: {err:?}",
-                    role_dims.d_a()
-                ))
-            })?;
+            let out =
+                super::fold::prove_fold::<Cfg::Field, Cfg::ExtField, T, O, TS, R, SP, Cfg, D>(
+                    &self.stage2,
+                    expanded,
+                    prefix_slots,
+                    self.stacks.prove_stack_at_level(level),
+                    transcript,
+                    level,
+                    level_params,
+                    next_params,
+                    step.output_witness_len,
+                    next_binding,
+                    prepared_fold,
+                )
+                .map_err(|err| {
+                    AkitaError::InvalidInput(format!(
+                        "suffix fold level {level} d_a={} failed: {err:?}",
+                        role_dims.d_a()
+                    ))
+                })?;
             intermediate_levels.push(out.level_proof);
             current_state = out.next_state;
             level += 1;

@@ -21,11 +21,12 @@ pub use batched_sumcheck::{
 };
 pub use compact_fold::CompactPairFoldLut;
 pub use single::{
-    advance_eq_factored_claim, prove_eq_factored_sumcheck, prove_sumcheck,
+    advance_eq_factored_claim, prove_eq_factored_sumcheck, prove_fallible_sumcheck, prove_sumcheck,
     verify_eq_factored_sumcheck, verify_sumcheck, verify_sumcheck_rounds,
 };
 pub use traits::{
-    EqFactoredSumcheckInstanceProver, SumcheckInstanceProver, SumcheckInstanceVerifier,
+    EqFactoredSumcheckInstanceProver, FallibleSumcheckInstanceProver, SumcheckInstanceProver,
+    SumcheckInstanceVerifier,
 };
 pub use types::{
     uniform_sumcheck_shape, EqFactoredSumcheckProof, EqFactoredSumcheckProofShape,

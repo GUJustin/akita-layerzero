@@ -62,6 +62,8 @@ mod extension_opening_reduction;
 mod fold;
 mod fold_kernels;
 mod prove;
+mod stage2_executor;
+use stage2_executor::{CpuStage2, Stage2Context, Stage2Executor};
 mod root_fold;
 mod root_group;
 mod suffix;
@@ -72,7 +74,8 @@ mod tests;
 ///
 /// The transcript, setup, schedule, and all protocol progress stay explicit in
 /// method arguments and return values.
-struct ProverExecutor<'stack, Stacks: ?Sized> {
+struct ProverExecutor<'stack, Stacks: ?Sized, D = CpuStage2> {
+    stage2: D,
     stacks: &'stack Stacks,
 }
 
@@ -83,6 +86,8 @@ pub(in crate::protocol::core) use fold::{
 };
 pub(in crate::protocol) use fold_kernels::*;
 pub use prove::batched_prove;
+#[cfg(feature = "resident-stage2-owned")]
+pub use prove::batched_prove_resident_stage2;
 #[allow(unused_imports)]
 pub(crate) use root_group::{
     PreparedCoefficientPackingGroup, PreparedEvaluationTraceGroup, PreparedGroupOpening,
@@ -113,3 +118,6 @@ pub(in crate::protocol::core) struct Stage3ProveOutput<E: Field> {
     pub(in crate::protocol::core) proof: SetupSumcheckProof<E>,
     pub(in crate::protocol::core) setup_prefix_point: Vec<E>,
 }
+
+#[cfg(feature = "resident-stage2-owned")]
+pub use prove::batched_prove_hybrid_stage2;
