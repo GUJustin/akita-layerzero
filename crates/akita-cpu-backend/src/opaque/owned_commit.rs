@@ -204,64 +204,77 @@ mod tests {
                     PortableStatePolicy,
                 )
                 .unwrap();
-                let evals = (0..1usize << NUM_VARS)
-                    .map(|index| F::from_u64(index as u64 + 1))
-                    .collect::<Vec<_>>();
-                let poly = DensePoly::<F>::from_field_evals(NUM_VARS, &evals).unwrap();
-                let expected = crate::commitment::commit::<Cfg, _, _>(
-                    std::slice::from_ref(&poly),
-                    setup.expanded.as_ref(),
-                    &schedules,
-                    &executor,
-                    GroupContext::explicit(&profile),
-                )
-                .unwrap();
-                let source = backend.import_source(vec![poly]).unwrap();
-                let actual = backend
-                    .commit(&schedules, &source, GroupContext::explicit(&profile))
+                for live in [0, 1, 4097, 1usize << NUM_VARS] {
+                    let evals = (0..1usize << NUM_VARS)
+                        .map(|index| {
+                            if index < live {
+                                F::from_u64(index as u64 + 1)
+                            } else {
+                                F::from_u64(0)
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let poly = DensePoly::<F>::from_field_evals(NUM_VARS, &evals).unwrap();
+                    let expected = crate::commitment::commit::<Cfg, _, _>(
+                        std::slice::from_ref(&poly),
+                        setup.expanded.as_ref(),
+                        &schedules,
+                        &executor,
+                        GroupContext::explicit(&profile),
+                    )
                     .unwrap();
+                    let compact =
+                        DensePoly::from_field_prefix(NUM_VARS, evals[..live].to_vec()).unwrap();
+                    let source = backend.import_source(vec![compact]).unwrap();
+                    let actual = backend
+                        .commit(&schedules, &source, GroupContext::explicit(&profile))
+                        .unwrap();
 
-                assert_eq!(actual.committed_group, expected.committed_group);
-                assert_eq!(
-                    actual.private_handle.committed.retained,
-                    expected.prover_state
-                );
+                    assert_eq!(actual.committed_group, expected.committed_group);
+                    assert_eq!(
+                        actual.private_handle.committed.retained,
+                        expected.prover_state
+                    );
 
-                let reimported = backend.import_commitment(&actual.private_handle).unwrap();
-                assert!(Arc::ptr_eq(
-                    &reimported.committed,
-                    &actual.private_handle.committed
-                ));
+                    let reimported = backend.import_commitment(&actual.private_handle).unwrap();
+                    assert!(Arc::ptr_eq(
+                        &reimported.committed,
+                        &actual.private_handle.committed
+                    ));
 
-                let receiving_backend = CpuBackend::<F, E>::new(setup.expanded.clone()).unwrap();
-                let transferred = receiving_backend
-                    .import_commitment(&actual.private_handle)
+                    let receiving_backend =
+                        CpuBackend::<F, E>::new(setup.expanded.clone()).unwrap();
+                    let transferred = receiving_backend
+                        .import_commitment(&actual.private_handle)
+                        .unwrap();
+                    assert_eq!(transferred.committed.retained, expected.prover_state);
+                    let mut other_descriptor = setup.expanded.descriptor().clone();
+                    other_descriptor.setup_seed = AkitaSetupSeed::shake256_paged_v1([0xA5; 32]);
+                    let other_matrix = akita_types::derive_public_matrix_prefix::<F>(
+                        other_descriptor.num_field_elements,
+                        &other_descriptor.setup_seed,
+                    );
+                    let other_backend = CpuBackend::<F, E>::new(Arc::new(
+                        AkitaExpandedSetup::from_trusted_seed_derived_parts_unchecked(
+                            other_descriptor,
+                            other_matrix,
+                        ),
+                    ))
                     .unwrap();
-                assert_eq!(transferred.committed.retained, expected.prover_state);
-                let mut other_descriptor = setup.expanded.descriptor().clone();
-                other_descriptor.setup_seed = AkitaSetupSeed::shake256_paged_v1([0xA5; 32]);
-                let other_matrix = akita_types::derive_public_matrix_prefix::<F>(
-                    other_descriptor.num_field_elements,
-                    &other_descriptor.setup_seed,
-                );
-                let other_backend = CpuBackend::<F, E>::new(Arc::new(
-                    AkitaExpandedSetup::from_trusted_seed_derived_parts_unchecked(
-                        other_descriptor,
-                        other_matrix,
-                    ),
-                ))
-                .unwrap();
-                assert!(other_backend
-                    .import_commitment(&actual.private_handle)
-                    .is_err());
-                assert_eq!(
-                    actual.private_handle.producer_contract(),
-                    Cfg::committed_source_contract().unwrap()
-                );
-                assert_eq!(
-                    transferred.producer_contract(),
-                    actual.private_handle.producer_contract()
-                );
+                    if live != 0 {
+                        assert!(other_backend
+                            .import_commitment(&actual.private_handle)
+                            .is_err());
+                    }
+                    assert_eq!(
+                        actual.private_handle.producer_contract(),
+                        Cfg::committed_source_contract().unwrap()
+                    );
+                    assert_eq!(
+                        transferred.producer_contract(),
+                        actual.private_handle.producer_contract()
+                    );
+                }
             })
             .unwrap()
             .join()
