@@ -27,13 +27,19 @@ where
         + AkitaSerialize
         + 'static,
 {
-    /// Import a retained commitment from another backend after validating its
-    /// source and complete commitment material against this backend's setup.
+    /// Reuse an already-owned commitment, or import a foreign commitment after
+    /// validating its source and complete commitment material against this setup.
     pub fn import_commitment(
         &self,
         foreign: &CommitmentHandle<F, E>,
     ) -> Result<CommitmentHandle<F, E>, AkitaError> {
         let prepared = self.prepared()?;
+        // Handles are immutable and constructed only after this owner admitted
+        // the source and commitment. Reimporting on the same owner needs no copy
+        // or setup validation; foreign handles still take the checked path below.
+        if foreign.owner == self.owner_id() {
+            return Ok(foreign.clone());
+        }
         let committed = &foreign.committed;
         let source = self.import_source(committed.source.dense_polynomials()?)?;
         let sources = source.storage.commitment_sources();
@@ -162,6 +168,7 @@ mod tests {
     use akita_config::proof_optimized::fp64;
     use akita_params::{OpeningClaimsLayout, ScheduleLookupKey};
     use akita_prover::CommitmentHandleMetadata;
+    use akita_types::{AkitaExpandedSetup, AkitaSetupSeed};
     use jolt_field::Ring;
 
     type Cfg = fp64::Dense;
@@ -220,11 +227,33 @@ mod tests {
                     expected.prover_state
                 );
 
+                let reimported = backend.import_commitment(&actual.private_handle).unwrap();
+                assert!(Arc::ptr_eq(
+                    &reimported.committed,
+                    &actual.private_handle.committed
+                ));
+
                 let receiving_backend = CpuBackend::<F, E>::new(setup.expanded.clone()).unwrap();
                 let transferred = receiving_backend
                     .import_commitment(&actual.private_handle)
                     .unwrap();
                 assert_eq!(transferred.committed.retained, expected.prover_state);
+                let mut other_descriptor = setup.expanded.descriptor().clone();
+                other_descriptor.setup_seed = AkitaSetupSeed::shake256_paged_v1([0xA5; 32]);
+                let other_matrix = akita_types::derive_public_matrix_prefix::<F>(
+                    other_descriptor.num_field_elements,
+                    &other_descriptor.setup_seed,
+                );
+                let other_backend = CpuBackend::<F, E>::new(Arc::new(
+                    AkitaExpandedSetup::from_trusted_seed_derived_parts_unchecked(
+                        other_descriptor,
+                        other_matrix,
+                    ),
+                ))
+                .unwrap();
+                assert!(other_backend
+                    .import_commitment(&actual.private_handle)
+                    .is_err());
                 assert_eq!(
                     actual.private_handle.producer_contract(),
                     Cfg::committed_source_contract().unwrap()
