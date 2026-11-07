@@ -186,10 +186,13 @@ pub(super) fn mat_vec_mul_blocks_i8_with_params_impl<
     #[cfg(feature = "parallel")]
     let prefer_blocks = {
         let column_tasks = inner_width.div_ceil(tile_width);
+        let workers = rayon::current_num_threads();
+        let block_waves = num_live_blocks.div_ceil(workers);
         inner_width <= safe_width
             && column_tasks > 1
             && column_tasks < num_live_blocks
-            && column_tasks < rayon::current_num_threads()
+            && column_tasks < workers
+            && column_tasks <= num_live_blocks / block_waves
     };
     #[cfg(not(feature = "parallel"))]
     let prefer_blocks = false;
