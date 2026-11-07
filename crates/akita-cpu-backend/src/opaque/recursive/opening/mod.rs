@@ -18,7 +18,7 @@ use jolt_field::{Fold, Unreduced};
 use rayon::prelude::*;
 
 /// Degree-two round-message accumulator that honors a field's delayed-reduction
-/// exactness contract (`Unreduced::SUM_IS_EXACT`).
+/// exactness contract and its preference for accelerated reduced products.
 ///
 /// Every extension-opening reduction round needs two batch sums: the constant
 /// coefficient `Σ c0·c1` and the quadratic coefficient `Σ q0·q1`. This trait
@@ -31,8 +31,8 @@ use rayon::prelude::*;
 ///   sizes (e.g. `FpExt4<Fp32>`, `FpExt2<Fp64>`).
 /// - [`DirectDeg2`] reduces every product immediately via `Mul`, so the summed
 ///   coefficient is byte-identical to per-term reduction. This is the
-///   contract-safe path for fields that leave `SUM_IS_EXACT` at
-///   its conservative `false` default.
+///   path for fields without exact wide sums or with
+///   `Unreduced::PREFER_REDUCED_PRODUCTS` set.
 trait Deg2RoundAccum<E: Field + Unreduced>: Sized + Send {
     /// Empty accumulator (both coefficients zero).
     fn zero() -> Self;
@@ -89,7 +89,8 @@ impl<E: Field + Unreduced> Deg2RoundAccum<E> for DelayedDeg2<E> {
 
 /// Per-term reduction accumulator: every product is reduced immediately, so the
 /// summed coefficient is byte-identical to per-term `Mul`. Contract-safe
-/// fallback for fields with `SUM_IS_EXACT == false`.
+/// fallback for fields without exact wide sums, and the preferred path for
+/// accelerated reduced products.
 struct DirectDeg2<E> {
     constant: E,
     quadratic: E,
