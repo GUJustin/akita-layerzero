@@ -23,7 +23,7 @@ pub(super) fn accumulate_equality_weighted_pair_terms<E: Field + Unreduced, cons
 ) -> [E; N] {
     debug_assert!(explicit_pair_count <= first.len() * second.len());
     let explicit_block_count = explicit_pair_count.div_ceil(first.len());
-    if E::SUM_IS_EXACT {
+    if E::SUM_IS_EXACT && !E::PREFER_REDUCED_PRODUCTS {
         cfg_fold_reduce!(
             0..explicit_block_count,
             || [E::Product::zero(); N],

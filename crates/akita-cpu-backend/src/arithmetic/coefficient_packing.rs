@@ -129,7 +129,7 @@ where
                 })?
                 .min(point.num_positions_per_block())
                 .min(nonzero_positions.saturating_sub(first_position));
-            let packed = if E::SUM_IS_EXACT {
+            let packed = if E::SUM_IS_EXACT && !E::PREFER_REDUCED_PRODUCTS {
                 let mut products = zero_vec::<<E as Unreduced>::Product>(s)?;
                 // Small strides expose more independent subring accumulators
                 // than products per accumulator. At larger strides, preserve

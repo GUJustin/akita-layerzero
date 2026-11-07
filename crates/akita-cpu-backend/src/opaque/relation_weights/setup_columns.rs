@@ -163,7 +163,7 @@ where
     F: Field,
     E: ExtField<F> + MulBaseUnreduced<F>,
 {
-    if E::SUM_IS_EXACT {
+    if E::SUM_IS_EXACT && !E::PREFER_REDUCED_PRODUCTS {
         contract_setup_residue_columns_with::<F, E, DelayedBaseProductSum<E>>(
             family,
             columns,
