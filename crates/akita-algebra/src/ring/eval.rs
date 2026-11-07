@@ -134,9 +134,6 @@ mod tests {
         }))
     }
 
-    /// The deferred-reduction dot product must equal the per-term reduce path
-    /// bit-for-bit at `D = 64` (validates the `Fp128` accumulator headroom that
-    /// `SUM_IS_EXACT = false` leaves formally unblessed).
     #[test]
     fn deferred_matches_per_term_fp128_d64() {
         for seed in 0..128u128 {

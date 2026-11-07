@@ -216,7 +216,7 @@ impl<E: Field> EvaluatedReducedCompressionMatrix<E> {
             ));
         }
         let high_start = physical_start / self.ring_dimension;
-        if E::SUM_IS_EXACT {
+        if E::SUM_IS_EXACT && !E::PREFER_REDUCED_PRODUCTS {
             let mut evaluation = E::Product::zero();
             match &self.columns {
                 ReducedCompressionColumnEvaluations::Aligned(columns) => {

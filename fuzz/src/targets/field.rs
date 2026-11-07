@@ -193,8 +193,8 @@ where
 
 /// `akita_algebra::ring::eval::eval_ring_at_pows_fast` sums up to `D` (at
 /// most 1024 for q128) `mul_base_unreduced` products and reduces once, relying
-/// on the fp128 accumulator's documented `~2^64`-term headroom even though
-/// `SUM_IS_EXACT` stays `false`. Check exactly that use at full width.
+/// on the fp128 accumulator's documented `2^64 - 1`-term headroom.
+/// Check that use at full width, including maximal canonical factors.
 fn fp128_deferred_ring_evaluation(reader: &mut Reader<'_>) {
     type F = fp128::Field;
     let terms = match reader.u8() % 4 {

@@ -94,7 +94,7 @@ where
     E: ExtField<F> + MulBaseUnreduced<F>,
 {
     let (functional_classes, scan_groups) = reduced_functional_classes::<_, BASE_D>(plan, weights)?;
-    if E::SUM_IS_EXACT {
+    if E::SUM_IS_EXACT && !E::PREFER_REDUCED_PRODUCTS {
         evaluate_groups_reduced_with::<F, _, BASE_D, DelayedProductSum<E>>(
             plan,
             setup_view,
