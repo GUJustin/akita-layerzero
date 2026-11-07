@@ -316,3 +316,5 @@ fn raw_block_bound_uses_bounded_scratch_and_live_columns() {
     assert_eq!(bound(18, &mut scratch), 128);
     assert_eq!(scratch.len(), 4);
 }
+
+mod adaptive_axis;

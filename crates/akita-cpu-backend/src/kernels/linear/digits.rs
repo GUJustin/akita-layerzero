@@ -176,9 +176,26 @@ pub(super) fn mat_vec_mul_blocks_i8_with_params_impl<
             _ => AkitaError::InvalidSetup(capacity_error.into()),
         })?;
     let chunk_width = capacity_safe_i8_chunk_width(safe_width, inner_width, shape.num_digits);
+    let tile_width = aligned_i8_tile_width(
+        base_tile_width::<W, K, D>(n_a),
+        inner_width,
+        shape.num_digits,
+    );
+    // When column tiles cannot fill the pool, independent input blocks can
+    // expose more parallel work. Keep small one-tile calls on the tiled path.
+    #[cfg(feature = "parallel")]
+    let prefer_blocks = {
+        let column_tasks = inner_width.div_ceil(tile_width);
+        inner_width <= safe_width
+            && column_tasks > 1
+            && column_tasks < num_live_blocks
+            && column_tasks < rayon::current_num_threads()
+    };
+    #[cfg(not(feature = "parallel"))]
+    let prefer_blocks = false;
     if matches!(policy, I8CommitPolicy::Dense)
         && n_a <= DENSE_I8_BLOCK_PARALLEL_MAX_ROWS
-        && num_live_blocks >= DENSE_I8_BLOCK_PARALLEL_MIN_BLOCKS
+        && (num_live_blocks >= DENSE_I8_BLOCK_PARALLEL_MIN_BLOCKS || prefer_blocks)
         && inner_width == max_data_width
     {
         if inner_width <= safe_width {
@@ -210,11 +227,6 @@ pub(super) fn mat_vec_mul_blocks_i8_with_params_impl<
     };
     let lut = DigitMontLut::<W, K>::new_with_digit_bound(params, lut_bound);
     let batch = params.pointwise_dot_batch_size();
-    let tile_width = aligned_i8_tile_width(
-        base_tile_width::<W, K, D>(n_a),
-        inner_width,
-        shape.num_digits,
-    );
     let max_rings = batch.max(shape.num_digits).div_ceil(shape.num_digits) + 1;
     drive_block_chunked_matvec(
         num_live_blocks,
