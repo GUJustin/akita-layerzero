@@ -13,7 +13,7 @@ fn adaptive_matvec_axis_matches_sparse_convolution_with_partial_blocks() {
     let scalars: Vec<F> = (0..width)
         .map(|i| {
             F::from_u128(
-                ((i as u128 + 17) * 0x9E37_79B1_85EB_CA87 << 64)
+                (((i as u128 + 17) * 0x9E37_79B1_85EB_CA87) << 64)
                     | (i as u128 * 0xC2B2_AE3D_27D4_EB4F),
             )
         })
