@@ -25,6 +25,46 @@ fn matrix(len: usize, rng: &mut StdRng) -> Vec<F> {
         .collect()
 }
 
+#[cfg(feature = "parallel")]
+#[test]
+fn key_preparation_matches_oracle_across_worker_counts_and_threshold() {
+    let _gpu_guard = support::gpu();
+    let mut rng = StdRng::seed_from_u64(905);
+    let a = matrix(128 * D, &mut rng);
+    let indices: Vec<_> = (0..32)
+        .map(|i| (i % 5 != 0).then_some((i % 16) as u8))
+        .collect();
+    let sources = [OneHotSource {
+        indices: &indices,
+        chunk_size: 16,
+        num_vars: 9,
+    }];
+    for workers in [1, 4] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .build()
+            .expect("worker pool");
+        pool.install(|| {
+            // Device buffers stay on the worker that creates them.
+            let metal = akita_metal::AkitaMetal::new().expect("Metal");
+            let device = DeviceK16Sources::new(&metal, &sources).expect("sources");
+            let mut workspace = OneHotNttWorkspace::new(&metal);
+            for rings in [63, 64, 65, 128] {
+                let shape = OneHotCommitShape {
+                    n_a: rings,
+                    active_a_cols: 1,
+                    num_digits_inner: 1,
+                };
+                let expected = model(&a, &sources, shape);
+                let key =
+                    DeviceOneHotNttKey::new(&metal, &a[..rings * D]).expect("prepare reusable key");
+                let (output, _) = workspace.commit(&key, &device, shape).expect("commit");
+                assert_eq!(output.read().expect("read"), expected.as_slice());
+            }
+        });
+    }
+}
+
 fn model(a: &[F], sources: &[OneHotSource<'_, u8>], shape: OneHotCommitShape) -> Vec<F> {
     let positions = shape.active_a_cols / shape.num_digits_inner;
     let mut out = Vec::new();

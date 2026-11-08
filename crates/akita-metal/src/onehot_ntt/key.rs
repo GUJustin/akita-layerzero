@@ -7,6 +7,8 @@ use akita_algebra::{NttKernelPlan, NttPrime};
 use akita_error::checked;
 use jolt_field::Prime128OffsetA7F7;
 use jolt_metal::runtime::DeviceBuffer;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 use crate::{AkitaMetal, AkitaMetalError};
 
@@ -73,7 +75,8 @@ impl DeviceOneHotNttKey {
         transformed.try_reserve_exact(len).map_err(|_| {
             AkitaMetalError::Shape(format!("cannot stage {len} transformed key words"))
         })?;
-        for ring in coefficients.chunks_exact(D) {
+        transformed.resize(len, 0);
+        let fill = |ring: &[Prime128OffsetA7F7], output: &mut [u32]| {
             // Extract all limbs together; recomputing lower-limb carries for
             // each transform repeats the conversion work quadratically.
             let limbs: [[i32; LIMBS]; D] = std::array::from_fn(|i| {
@@ -90,10 +93,6 @@ impl DeviceOneHotNttKey {
                     }
                 })
             });
-            #[expect(
-                clippy::needless_range_loop,
-                reason = "iterate columns of the coefficient-by-limb array, not its rows"
-            )]
             for limb in 0..LIMBS {
                 let mut values = std::array::from_fn(|i| prime.from_canonical(limbs[i][limb]));
                 forward_ntt(&mut values, prime, &twiddles, plan);
@@ -101,8 +100,26 @@ impl DeviceOneHotNttKey {
                 // transform writes natural frequencies with coalesced stores.
                 for frequency in 0..D {
                     let reversed = frequency.reverse_bits() >> (usize::BITS - D.ilog2());
-                    transformed.push(prime.normalize(values[reversed]).raw() as u32);
+                    output[limb * D + frequency] = prime.normalize(values[reversed]).raw() as u32;
                 }
+            }
+        };
+        #[cfg(feature = "parallel")]
+        let use_parallel = coefficients.len() / D >= 64 && rayon::current_num_threads() > 1;
+        #[cfg(not(feature = "parallel"))]
+        let use_parallel = false;
+        if use_parallel {
+            #[cfg(feature = "parallel")]
+            transformed
+                .par_chunks_exact_mut(LIMBS * D)
+                .zip(coefficients.par_chunks_exact(D))
+                .for_each(|(output, ring)| fill(ring, output));
+        } else {
+            for (output, ring) in transformed
+                .chunks_exact_mut(LIMBS * D)
+                .zip(coefficients.chunks_exact(D))
+            {
+                fill(ring, output);
             }
         }
         let tables = transform_tables(prime, &twiddles);
