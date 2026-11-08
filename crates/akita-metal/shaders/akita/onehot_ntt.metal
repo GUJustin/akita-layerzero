@@ -41,6 +41,16 @@ kernel void akita_onehot_limb_commit(
     ulong live_chunks = metal::min(source.chunks, source.fields / 16);
     ulong source_base = source.hot_offset + ulong(block) * p.positions * 32;
     ulong block_chunks = ulong(block) * p.positions * 32;
+    // Short device backing denotes absent entries, including trimmed tails.
+    // Whole zero chunks still overwrite their partials (or the first output),
+    // but require neither key reads nor transforms.
+    if (block_chunks + ulong(begin) * 32 >= live_chunks) {
+        for (uint coeff = tid; coeff < 512; coeff += 256) {
+            if (!p.direct_output || p.first_chunk == 0)
+                out[ulong(group) * 512 + coeff] = F::zero();
+        }
+        return;
+    }
     KeyIndex key_row = KeyIndex(row_a) * p.columns * 4096;
     KeyIndex key_stride = KeyIndex(p.digits) * 4096;
     device const uint* tw = tables + 16384;

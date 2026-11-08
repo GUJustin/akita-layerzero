@@ -79,7 +79,8 @@ fn limb_commitments_match_cpu_across_rows_digits_and_sources() {
                 _ => Some(rng.gen_range(0..16)),
             })
             .collect();
-        let first = vec![Some(0u8); 32];
+        let mut first = vec![Some(0u8); 32];
+        first.resize(64, None); // A present zero at the end must survive trimming.
         let empty = vec![None; 32];
         let sources = [
             OneHotSource {
@@ -205,9 +206,16 @@ fn maximal_limbs_cross_reconstruction_boundaries_without_wraparound() {
     let mut workspace = OneHotNttWorkspace::new(metal);
     // Dense sources maximize the integer convolution bound. Last-position
     // digits exercise negative wrap; 252/253 straddle reconstruction chunks.
+    // Absent tails exercise skipping later partials without dropping Some(0).
     let backing: Vec<Vec<Option<u8>>> = [251, 252, 253, 504, 512]
         .into_iter()
-        .flat_map(|positions| [0, 15].map(|digit| vec![Some(digit); positions * 32]))
+        .flat_map(|positions| {
+            [0, 15].map(|digit| {
+                let mut indices = vec![Some(digit); positions * 32];
+                indices.resize(512 * 32, None);
+                indices
+            })
+        })
         .collect();
     let sources: Vec<_> = backing
         .iter()

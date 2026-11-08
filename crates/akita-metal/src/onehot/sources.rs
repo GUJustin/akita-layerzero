@@ -29,7 +29,7 @@ impl DeviceOneHotSources {
         metal: &AkitaMetal,
         sources: &[OneHotSource<'_, I>],
     ) -> Result<Self, AkitaMetalError> {
-        let (hot, sources) = stage_sources(sources, std::convert::identity)?;
+        let (hot, sources) = stage_sources::<_, _, false>(sources, std::convert::identity)?;
         Ok(Self {
             hot: DeviceBuffer::from_slice(metal.device(), &hot)?,
             sources,
@@ -41,6 +41,7 @@ impl DeviceOneHotSources {
 ///
 /// This is an alternative encoding of the same source, not a different
 /// polynomial. Logical source bounds remain separate from backing storage.
+/// Absent suffixes are omitted from device backing; present zero digits stay.
 pub struct DeviceK16Sources {
     pub(crate) hot: DeviceBuffer<u8>,
     pub(crate) sources: Vec<SourceLayout>,
@@ -57,7 +58,7 @@ impl DeviceK16Sources {
         }
         // stage_sources validates present entries against 16. The only other
         // value is NO_HOT, whose low byte is the absent sentinel 255.
-        let (hot, sources) = stage_sources(sources, |value| value as u8)?;
+        let (hot, sources) = stage_sources::<_, _, true>(sources, |value| value as u8)?;
         Ok(Self {
             hot: DeviceBuffer::from_slice(metal.device(), &hot)?,
             sources,
@@ -65,7 +66,11 @@ impl DeviceK16Sources {
     }
 }
 
-fn stage_sources<I: OneHotIndex, T>(
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "before each push len < the checked total; every source starts at or before the final len"
+)]
+fn stage_sources<I: OneHotIndex, T, const TRIM_ABSENT: bool>(
     sources: &[OneHotSource<'_, I>],
     encode: impl Fn(u32) -> T,
 ) -> Result<(Vec<T>, Vec<SourceLayout>), AkitaMetalError> {
@@ -91,29 +96,40 @@ fn stage_sources<I: OneHotIndex, T>(
                     source.num_vars
                 ))
             })?;
-        layouts.push(SourceLayout {
-            hot_offset: hot.len(),
-            chunks: source.indices.len(),
-            fields,
-            log_chunk: chunk_size.trailing_zeros(),
-            num_vars: source.num_vars,
-        });
+        let hot_offset = hot.len();
+        let mut last_present_end = hot_offset;
         for index in source.indices {
             hot.push(encode(match index {
                 None => NO_HOT,
                 // A chunk size below 2^32 keeps every valid index below
                 // NO_HOT.
-                Some(index) => u32::try_from(index.as_usize())
-                    .ok()
-                    .filter(|&index| (index as usize) < chunk_size)
-                    .ok_or_else(|| {
-                        shape_error(format!(
-                            "hot index {} is outside a chunk of {chunk_size}",
-                            index.as_usize()
-                        ))
-                    })?,
+                Some(index) => {
+                    let index = u32::try_from(index.as_usize())
+                        .ok()
+                        .filter(|&index| (index as usize) < chunk_size)
+                        .ok_or_else(|| {
+                            shape_error(format!(
+                                "hot index {} is outside a chunk of {chunk_size}",
+                                index.as_usize()
+                            ))
+                        })?;
+                    if TRIM_ABSENT {
+                        last_present_end = hot.len() + 1;
+                    }
+                    index
+                }
             }));
         }
+        if TRIM_ABSENT {
+            hot.truncate(last_present_end);
+        }
+        layouts.push(SourceLayout {
+            hot_offset,
+            chunks: hot.len() - hot_offset,
+            fields,
+            log_chunk: chunk_size.trailing_zeros(),
+            num_vars: source.num_vars,
+        });
     }
     Ok((hot, layouts))
 }
