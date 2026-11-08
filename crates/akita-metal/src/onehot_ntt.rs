@@ -9,7 +9,6 @@ pub use key::DeviceOneHotNttKey;
 
 use std::time::Duration;
 
-use akita_algebra::ntt::I32_LAZY_DOT_BATCH;
 use akita_algebra::tables::Q128_RAW_PRIMES;
 use akita_error::checked;
 use bytemuck::{Pod, Zeroable};
@@ -36,7 +35,7 @@ pub(crate) fn instances() -> Vec<Instance> {
         .flat_map(|prime| {
             ["ulong", "uint"].map(|index| Instance {
                 template: "akita_onehot_limb_commit",
-                args: format!("{}u, {I32_LAZY_DOT_BATCH}u, {prime}u, {index}", F::C),
+                args: format!("{}u, 4u, {prime}u, {index}", F::C),
                 host_name: if index == "uint" {
                     COMMIT_COMPACT.into()
                 } else {
@@ -71,6 +70,7 @@ struct CommitParams {
     digits: u32,
     rows: u32,
     rings: u32,
+    task_groups: u32,
     reconstruction_positions: u32,
     first_chunk: u32,
     parts: u32,
@@ -160,7 +160,16 @@ impl<'a> OneHotNttWorkspace<'a> {
             checked::product([len, size_of::<F>()])
                 .ok_or_else(|| AkitaMetalError::Shape("partial bytes overflow usize".into()))?;
         }
-        let threads = checked::product([parts, rings, THREADS])
+        let paired_rows = checked::product([2, geometry.rows])
+            .ok_or_else(|| AkitaMetalError::Shape("paired row count overflows usize".into()))?;
+        let task_groups = if rings == 0 {
+            0
+        } else {
+            checked::div_ceil(rings, paired_rows)
+                .and_then(|pairs| checked::product([pairs, geometry.rows]))
+                .ok_or_else(|| AkitaMetalError::Shape("paired task count overflows usize".into()))?
+        };
+        let threads = checked::product([parts, task_groups, THREADS])
             .ok_or_else(|| AkitaMetalError::Shape("dispatch size overflows usize".into()))?;
         to_u32(threads)?;
         to_u32(len)?;
@@ -171,6 +180,7 @@ impl<'a> OneHotNttWorkspace<'a> {
             digits: to_u32(geometry.digits)?,
             rows: to_u32(geometry.rows)?,
             rings: to_u32(rings)?,
+            task_groups: to_u32(task_groups)?,
             reconstruction_positions: to_u32(matrix.reconstruction_positions)?,
             first_chunk: 0,
             parts: to_u32(parts)?,
@@ -236,12 +246,12 @@ impl<'a> OneHotNttWorkspace<'a> {
         let target = self.partials.as_ref().unwrap_or(out);
         let mut batch = Batch::new(device)?;
         for params in &windows {
-            let grid = checked::product([params.parts as usize, rings, THREADS])
+            let grid = checked::product([params.parts as usize, task_groups, THREADS])
                 .ok_or_else(|| AkitaMetalError::Shape("dispatch size overflows usize".into()))?;
             // SAFETY: all geometry, widths and buffer lengths were checked
-            // above. Each group owns one source/block/row/part; source loads
-            // check both backing and logical lengths. Serial dispatches order
-            // scratch reuse and updates to the retained output.
+            // above. Each group owns up to two output rings sharing an A-row
+            // and part; source loads check backing and logical lengths. Serial
+            // dispatches order scratch reuse and retained-output updates.
             unsafe {
                 batch.dispatch_unchecked(
                     commit,

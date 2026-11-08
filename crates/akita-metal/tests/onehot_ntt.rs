@@ -98,6 +98,18 @@ fn limb_commitments_match_cpu_across_rows_digits_and_sources() {
                 chunk_size: 16,
                 num_vars: 9,
             },
+            // Exercise both orders: a live source next to an empty one,
+            // and an empty source followed by a live one.
+            OneHotSource {
+                indices: &empty,
+                chunk_size: 16,
+                num_vars: 9,
+            },
+            OneHotSource {
+                indices: &first,
+                chunk_size: 16,
+                num_vars: 9,
+            },
         ];
         let expected = model(&a, &sources, shape);
         let flat = FlatMatrix::from_flat_data(a.clone());
