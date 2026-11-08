@@ -13,6 +13,7 @@ enum MontOp : uint {
     FROM_CANONICAL,
     TO_CANONICAL,
     CENTER,
+    SHOUP_CANONICAL,
     OPS
 };
 
@@ -40,4 +41,6 @@ enum MontOp : uint {
     row[FROM_CANONICAL] = akita::from_canonical(q, canonical);
     row[TO_CANONICAL] = akita::to_canonical(q, a);
     row[CENTER] = akita::center(q, canonical);
+    uint w_shoup = uint((ulong(uint(canonical)) << 32) / uint(q.p));
+    row[SHOUP_CANONICAL] = int(akita::shoup_mul_canonical(uint(a), uint(canonical), w_shoup, uint(q.p)));
 }

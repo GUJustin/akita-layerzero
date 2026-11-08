@@ -16,7 +16,6 @@
 
 use std::time::Duration;
 
-use akita_cpu_backend::{OneHotIndex, OneHotSource};
 use akita_error::checked;
 use bytemuck::{Pod, Zeroable};
 use jolt_field::{Prime128OffsetA7F7, Prime64Offset59};
@@ -25,6 +24,10 @@ use jolt_metal::MetalField;
 
 use crate::error::AkitaMetalError;
 use crate::library::{ring_degree_kernel, AkitaMetal, Instance, RING_DEGREES};
+
+mod sources;
+pub(crate) use sources::SourceLayout;
+pub use sources::{DeviceK16Sources, DeviceOneHotSources};
 
 /// `(MSL_NAME, HOST_SUFFIX, element bytes)` of the fields with one-hot
 /// kernels: the base fields of Akita's fp128 and fp64 presets.
@@ -168,90 +171,6 @@ impl<F: MetalField> DeviceFlatMatrix<F> {
     }
 }
 
-/// One uploaded source: where its chunks live and how they are sized.
-#[derive(Clone, Copy, Debug)]
-struct SourceLayout {
-    hot_offset: usize,
-    chunks: usize,
-    fields: usize,
-    log_chunk: u32,
-    num_vars: usize,
-}
-
-/// The hot indices of a group of one-hot sources in device memory, one
-/// `u32` per chunk (`u32::MAX` for a chunk without a hot entry), sources
-/// concatenated in order.
-pub struct DeviceOneHotSources {
-    hot: DeviceBuffer<u32>,
-    sources: Vec<SourceLayout>,
-}
-
-impl DeviceOneHotSources {
-    /// Uploads `sources`.
-    ///
-    /// Rejects a source whose chunk size is not a power of two below `2^32`
-    /// or that has a hot index outside its chunk. A [`OneHotPoly`] never has
-    /// either, since its chunk size times its chunk count is a power of two
-    /// and its constructor checks every index.
-    ///
-    /// [`OneHotPoly`]: akita_cpu_backend::OneHotPoly
-    pub fn new<I: OneHotIndex>(
-        metal: &AkitaMetal,
-        sources: &[OneHotSource<'_, I>],
-    ) -> Result<Self, AkitaMetalError> {
-        let total = checked::sum(sources.iter().map(|source| source.indices.len()))
-            .ok_or_else(|| shape_error("one-hot chunk count overflows usize"))?;
-        let mut hot = Vec::new();
-        hot.try_reserve_exact(total)
-            .map_err(|_| shape_error(format!("cannot stage {total} one-hot chunks")))?;
-        let mut layouts = Vec::with_capacity(sources.len());
-        for source in sources {
-            let chunk_size = source.chunk_size;
-            if !chunk_size.is_power_of_two() || u32::try_from(chunk_size).is_err() {
-                return Err(shape_error(format!(
-                    "one-hot chunk size {chunk_size} is not a power of two below 2^32"
-                )));
-            }
-            let fields = u32::try_from(source.num_vars)
-                .ok()
-                .and_then(|num_vars| 1usize.checked_shl(num_vars))
-                .ok_or_else(|| {
-                    shape_error(format!(
-                        "2^{} one-hot entries overflow the host address space",
-                        source.num_vars
-                    ))
-                })?;
-            layouts.push(SourceLayout {
-                hot_offset: hot.len(),
-                chunks: source.indices.len(),
-                fields,
-                log_chunk: chunk_size.trailing_zeros(),
-                num_vars: source.num_vars,
-            });
-            for index in source.indices {
-                hot.push(match index {
-                    None => NO_HOT,
-                    // A chunk size below 2^32 keeps every valid index below
-                    // NO_HOT.
-                    Some(index) => u32::try_from(index.as_usize())
-                        .ok()
-                        .filter(|&index| (index as usize) < chunk_size)
-                        .ok_or_else(|| {
-                            shape_error(format!(
-                                "hot index {} is outside a chunk of {chunk_size}",
-                                index.as_usize()
-                            ))
-                        })?,
-                });
-            }
-        }
-        Ok(Self {
-            hot: DeviceBuffer::from_slice(metal.device(), &hot)?,
-            sources: layouts,
-        })
-    }
-}
-
 /// The A-matrix geometry of a one-hot commitment, as the CPU's
 /// `CommitInnerPlan` gives it: `n_a` rows of `active_a_cols` ring elements,
 /// `num_digits_inner` columns per position, of which a one-hot unit touches
@@ -366,15 +285,15 @@ impl OneHotSchedule {
 
 /// A validated [`OneHotCommitShape`] at ring degree `D`.
 #[derive(Clone, Copy, Debug)]
-struct Geometry {
-    rows: usize,
-    columns: usize,
-    digits: usize,
-    positions: usize,
+pub(crate) struct Geometry {
+    pub(crate) rows: usize,
+    pub(crate) columns: usize,
+    pub(crate) digits: usize,
+    pub(crate) positions: usize,
 }
 
 impl Geometry {
-    fn new<const D: usize>(shape: OneHotCommitShape) -> Result<Self, AkitaMetalError> {
+    pub(crate) fn new<const D: usize>(shape: OneHotCommitShape) -> Result<Self, AkitaMetalError> {
         let positions = checked::exact_div(shape.active_a_cols, shape.num_digits_inner)
             .ok_or_else(|| {
                 shape_error(format!(
@@ -397,7 +316,10 @@ impl Geometry {
 
     /// The source's live blocks: its `2^num_vars / D` ring elements in
     /// blocks of `positions`, as the CPU's `OneHotSource::view_layout`.
-    fn blocks<const D: usize>(&self, source: &SourceLayout) -> Result<usize, AkitaMetalError> {
+    pub(crate) fn blocks<const D: usize>(
+        &self,
+        source: &SourceLayout,
+    ) -> Result<usize, AkitaMetalError> {
         let rings = checked::exact_div(source.fields, D).ok_or_else(|| {
             shape_error(format!(
                 "2^{} one-hot entries are not a whole number of D={D} ring elements",
@@ -638,12 +560,12 @@ fn shape_overflow(what: &str) -> AkitaMetalError {
     shape_error(format!("the {what} count overflows"))
 }
 
-fn to_u32(value: usize) -> Result<u32, AkitaMetalError> {
+pub(crate) fn to_u32(value: usize) -> Result<u32, AkitaMetalError> {
     u32::try_from(value)
         .map_err(|_| shape_error(format!("{value} exceeds the kernel's 32-bit range")))
 }
 
-fn to_u64(value: usize) -> Result<u64, AkitaMetalError> {
+pub(crate) fn to_u64(value: usize) -> Result<u64, AkitaMetalError> {
     u64::try_from(value)
         .map_err(|_| shape_error(format!("{value} exceeds the kernel's 64-bit range")))
 }

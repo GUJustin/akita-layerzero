@@ -107,7 +107,51 @@ exact sizes change.
 The kernels overwrite every logical output and partial before reading retained
 contents, so steady-state calls need no buffer clearing. Returned rows borrow the
 workspace until the caller finishes using them. This replaces the earlier
-allocating `commit_onehot` function; there is one canonical execution path.
+allocating `commit_onehot` function.
+
+### K16 inner commitments by limb NTT
+
+`OneHotNttWorkspace::commit` is an explicit alternative for
+`Prime128OffsetA7F7`, degree 512, and chunk size 16. The direct path remains
+available for these and all its other supported shapes. Both paths share
+source validation and geometry; neither changes the committed polynomial.
+
+The direct path adds a shifted key ring for each selected entry. The NTT
+path computes the same sum as small-prime convolutions. It splits each key
+coefficient into eight unsigned 16-bit limbs and transforms each limb once.
+`DeviceOneHotNttKey` prepares every supplied ring without taking a witness
+length. Each call validates its matrix view against that key, including
+row-major layout and digit stride. Shorter sources do not require a new key.
+
+To recover an integer convolution from one prime, its coefficients must
+remain strictly between `-p/2` and `p/2`. One K16 source ring has at most 32
+selected entries, so a chunk of `s` positions has coefficient magnitude at
+most `s * 32 * 65535` for each key limb. Preparation derives `s` from the
+first Q128 NTT prime, rounded down to a complete lazy-dot batch (currently
+252 positions). After each chunk, the shader centers the residues, combines
+the limbs with signed carries, and reduces in the original Fp128 field.
+It adds these field results across chunks, so total trace length is not
+limited by the small prime. Roots, prime parameters and key transforms come
+from `akita-algebra`; the shader uses the existing Montgomery/Shoup helpers.
+The host selects 32-bit key-word addressing when the validated matrix view
+fits, and retains 64-bit addressing for larger views. This choice is made per
+call and does not restrict key preparation or trace length.
+
+`DeviceK16Sources` stores one byte per chunk: 0 through 15 select an entry,
+and 255 denotes absence. The shader checks both the backing length and the
+logical source length. This saves three quarters of device source storage
+relative to `DeviceOneHotSources`. The transformed key costs twice the raw
+field key's storage. A caller need not keep the raw device key.
+
+Reconstruction chunks run in bounded batches, with at most 16 partials per
+output ring and less than 64 MiB of scratch. With enough output rings, each
+dispatch accumulates directly into the final output and needs no scratch.
+The first batch overwrites retained output; later batches add to it. The
+workspace shares one dispatch across sources to expose parallelism even
+when each source has few blocks. `onehot_ntt` tests cover reconstruction
+boundaries, matrix reinterpretation, source bounds, and buffer reuse.
+`cargo bench -p akita-metal --bench onehot_ntt` compares resident direct and
+NTT calls and reports preparation/upload times separately.
 
 ### Testing
 

@@ -88,6 +88,12 @@ inline uint shoup_mul(uint v, uint w, uint w_shoup, uint p) {
     return v * w - quotient * p;
 }
 
+// The same product in [0, p), for consumers that sum canonical residues.
+inline uint shoup_mul_canonical(uint v, uint w, uint w_shoup, uint p) {
+    uint r = shoup_mul(v, w, w_shoup, p);
+    return metal::select(r, r - p, r >= p);
+}
+
 } // namespace akita
 
 #endif // AKITA_MONT_H

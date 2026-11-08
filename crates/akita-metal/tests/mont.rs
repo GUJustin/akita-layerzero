@@ -12,7 +12,7 @@ use bytemuck::{Pod, Zeroable};
 use jolt_metal::runtime::{Batch, Binding, DeviceBuffer, Grid, LibrarySpec, ShaderLibrary};
 use support::{gpu, SplitMix64};
 
-const OPS: usize = 8;
+const OPS: usize = 9;
 const RANDOM_PAIRS: usize = 1 << 16;
 
 /// Layout of `akita::NttPrime`.
@@ -61,6 +61,7 @@ fn cpu_ops(prime: NttPrime<i32>, a: i32, b: i32, canonical: i32) -> [i32; OPS] {
         prime.from_canonical(canonical).raw(),
         prime.to_canonical(a_coefficient),
         prime.center(canonical),
+        (u64::from(a as u32) * canonical as u64 % prime.p as u64) as i32,
     ]
 }
 
@@ -124,6 +125,7 @@ fn check_prime(test: &support::GpuTest, library: &ShaderLibrary, prime: NttPrime
         "from_canonical",
         "to_canonical",
         "center",
+        "shoup_mul_canonical",
     ];
     for (index, ((&a, &b), &canonical)) in lhs.iter().zip(&rhs).zip(&canonicals).enumerate() {
         let expected = cpu_ops(prime, a, b, canonical);

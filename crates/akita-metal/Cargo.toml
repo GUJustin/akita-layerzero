@@ -62,5 +62,9 @@ harness = false
 name = "onehot"
 harness = false
 
+[[bench]]
+name = "onehot_ntt"
+harness = false
+
 [lints]
 workspace = true
