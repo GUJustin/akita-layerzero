@@ -19,7 +19,7 @@ use crate::library::Instance;
 use crate::ntt::DevicePrime;
 use crate::onehot::{to_u32, to_u64, DeviceK16Sources, Geometry, OneHotCommitShape};
 use crate::{AkitaMetal, AkitaMetalError};
-use key::D;
+use key::{D, LIMBS};
 
 const COMMIT: &str = "akita_onehot_limb_commit_fp128";
 const COMMIT_COMPACT: &str = "akita_onehot_limb_commit_compact_fp128";
@@ -202,7 +202,7 @@ impl<'a> OneHotNttWorkspace<'a> {
         // Larger views retain the 64-bit path; key preparation has no limit
         // tied to the current witness length.
         let compact =
-            checked::product([matrix_len, 8]).is_some_and(|words| u32::try_from(words).is_ok());
+            checked::product([matrix_len, LIMBS]).is_some_and(|words| u32::try_from(words).is_ok());
         let commit = self
             .metal
             .pipeline(if compact { COMMIT_COMPACT } else { COMMIT })?;

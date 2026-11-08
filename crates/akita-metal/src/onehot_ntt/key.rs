@@ -11,15 +11,15 @@ use jolt_metal::runtime::DeviceBuffer;
 use crate::{AkitaMetal, AkitaMetalError};
 
 pub(super) const D: usize = 512;
-pub(super) const LIMBS: usize = 8;
-pub(super) const LIMB_BITS: usize = 16;
+pub(super) const LIMBS: usize = 7;
+pub(super) const LIMB_BITS: usize = 19;
 pub(super) const ROWS: usize = D / 16;
 
-/// All rings of a flat Fp128 key, split into 16-bit limbs and transformed.
+/// All rings of a flat Fp128 key, split into signed 19-bit limbs and transformed.
 ///
 /// Preparation depends only on the supplied key. A commitment may view any
 /// validated prefix and matrix geometry, independently of its trace length.
-/// The transformed key uses twice the coefficient storage of the field key.
+/// The transformed key uses 7/4 of the coefficient storage of the field key.
 pub struct DeviceOneHotNttKey {
     pub(super) coefficient_count: usize,
     pub(super) transformed: DeviceBuffer<u32>,
@@ -57,9 +57,9 @@ impl DeviceOneHotNttKey {
         let twiddles = NttTwiddles::<i32, D>::compute(prime);
         let plan = NttKernelPlan::detect::<i32>();
         // Centering must recover the integer convolution without wraparound.
-        // Round down to complete lazy-dot batches; this is 252 positions for
+        // Round down to complete lazy-dot batches; this is 60 positions for
         // the current Q128 prime and six-product batch.
-        let max_positions = (modulus as usize / 2) / (ROWS * u16::MAX as usize);
+        let max_positions = (modulus as usize / 2) / (ROWS * (1 << (LIMB_BITS - 1)));
         let reconstruction_positions = max_positions / I32_LAZY_DOT_BATCH * I32_LAZY_DOT_BATCH;
         if reconstruction_positions == 0 || I32_LAZY_DOT_BATCH > 8 {
             return Err(AkitaMetalError::Shape(
@@ -74,12 +74,28 @@ impl DeviceOneHotNttKey {
             AkitaMetalError::Shape(format!("cannot stage {len} transformed key words"))
         })?;
         for ring in coefficients.chunks_exact(D) {
+            // Extract all limbs together; recomputing lower-limb carries for
+            // each transform repeats the conversion work quadratically.
+            let limbs: [[i32; LIMBS]; D] = std::array::from_fn(|i| {
+                let mut value = ring[i].to_canonical_u128();
+                std::array::from_fn(|_| {
+                    let raw = (value & ((1 << LIMB_BITS) - 1)) as i32;
+                    let round_up = raw >= 1 << (LIMB_BITS - 1);
+                    value = (value >> LIMB_BITS) + u128::from(round_up);
+                    let digit = raw - if round_up { 1 << LIMB_BITS } else { 0 };
+                    if digit < 0 {
+                        digit + modulus
+                    } else {
+                        digit
+                    }
+                })
+            });
+            #[expect(
+                clippy::needless_range_loop,
+                reason = "iterate columns of the coefficient-by-limb array, not its rows"
+            )]
             for limb in 0..LIMBS {
-                let mut values = std::array::from_fn(|i| {
-                    let value =
-                        (ring[i].to_canonical_u128() >> (limb * LIMB_BITS)) & u128::from(u16::MAX);
-                    prime.from_canonical(value as i32)
-                });
+                let mut values = std::array::from_fn(|i| prime.from_canonical(limbs[i][limb]));
                 forward_ntt(&mut values, prime, &twiddles, plan);
                 // Akita's DIF output is bit-reversed. The specialized K16
                 // transform writes natural frequencies with coalesced stores.

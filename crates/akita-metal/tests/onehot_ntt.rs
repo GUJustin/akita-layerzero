@@ -9,7 +9,7 @@ use akita_cpu_backend::OneHotSource;
 use akita_metal::onehot::{DeviceK16Sources, OneHotCommitShape};
 use akita_metal::onehot_ntt::{DeviceOneHotNttKey, OneHotNttWorkspace};
 use akita_params::FlatMatrix;
-use jolt_field::{Field, One, Prime128OffsetA7F7 as F, Zero};
+use jolt_field::{Field, One, Prime128OffsetA7F7 as F, Ring, Zero};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 const D: usize = 512;
@@ -347,4 +347,39 @@ fn rejects_invalid_shapes_and_keeps_workspace_reusable() {
     )
     .expect("short logical source");
     assert!(workspace.commit(&key, &short, shape).is_err());
+}
+
+#[test]
+fn signed_limb_extremes_cross_sixty_position_reconstruction() {
+    let gpu = support::gpu();
+    let positive = (0..6)
+        .map(|i| ((1u128 << 18) - 1) << (19 * i))
+        .sum::<u128>();
+    let negative = (1u128 << 127) - (0..6).map(|i| (1u128 << 18) << (19 * i)).sum::<u128>();
+    let backing: Vec<Vec<Option<u8>>> = [59, 60, 61, 64]
+        .into_iter()
+        .flat_map(|positions| [0, 15].map(|digit| vec![Some(digit); positions * 32]))
+        .collect();
+    let sources: Vec<_> = backing
+        .iter()
+        .map(|indices| OneHotSource {
+            indices,
+            chunk_size: 16,
+            num_vars: 15,
+        })
+        .collect();
+    let shape = OneHotCommitShape {
+        n_a: 1,
+        active_a_cols: 64,
+        num_digits_inner: 1,
+    };
+    let packed = DeviceK16Sources::new(&gpu.metal, &sources).expect("sources");
+    let mut workspace = OneHotNttWorkspace::new(&gpu.metal);
+    for value in [positive, negative] {
+        let a = vec![F::from_u128(value); 64 * D];
+        let key = DeviceOneHotNttKey::new(&gpu.metal, &a).expect("key");
+        let expected = model(&a, &sources, shape);
+        let (out, _) = workspace.commit(&key, &packed, shape).expect("commit");
+        assert_eq!(out.read().expect("read"), expected.as_slice());
+    }
 }

@@ -1,5 +1,5 @@
-// Exact K16/D512 convolutions of eight 16-bit key limbs. The host derives
-// the reconstruction span from the prime so span*32*65535 < p/2. Each
+// Exact K16/D512 convolutions of seven signed 19-bit key limbs. The host
+// derives the reconstruction span so span*32*2^18 < p/2. Each
 // batch reconstructs into Fp128 before its results are accumulated further.
 namespace akita {
 struct OneHotLimbSource {
@@ -55,8 +55,8 @@ kernel void akita_onehot_limb_commit(
             }
         return;
     }
-    KeyIndex key_row = KeyIndex(row_a) * p.columns * 4096;
-    KeyIndex key_stride = KeyIndex(p.digits) * 4096;
+    KeyIndex key_row = KeyIndex(row_a) * p.columns * 3584;
+    KeyIndex key_stride = KeyIndex(p.digits) * 3584;
     device const uint* tw = tables + 16384;
     device const uint* twq = tw + 8;
     device const uint* invw = twq + 8;
@@ -64,7 +64,7 @@ kernel void akita_onehot_limb_commit(
     device const uint* untwist = invwq + 256;
     device const uint* untwistq = untwist + 512;
     threadgroup uint work[4096];
-    uint2 acc[16] = {};
+    uint2 acc[14] = {};
     for (uint first = begin; first < end; first += DOT_BATCH) {
         KeyIndex first_key = key_row + KeyIndex(first) * key_stride;
         if (tid < 2 * DOT_BATCH * 32) {
@@ -99,7 +99,7 @@ kernel void akita_onehot_limb_commit(
             }
         }
         metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup);
-        for (uint i = 0; i < 16; i++) {
+        for (uint i = 0; i < 14; i++) {
             uint idx = tid + i * 256, coeff = idx % 512;
             ulong2 sum = ulong2(0);
             for (uint r = 0; r < DOT_BATCH; r++) if (first + r < end) {
@@ -119,14 +119,14 @@ kernel void akita_onehot_limb_commit(
     }
     for (uint s = 0; s < 2; s++) {
         if (task[s] >= p.rings) break;
-        for (uint i = 0; i < 16; i++) {
+        for (uint i = 0; i < 14; i++) {
             uint idx = tid + i * 256;
             work[(idx / 512) * 512 + (metal::reverse_bits(idx % 512) >> 23)] = s == 0 ? acc[i].x : acc[i].y;
         }
         metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup);
         for (uint len = 2; len <= 512; len *= 2) {
             uint half_len = len / 2;
-            for (uint i = tid; i < 2048; i += 256) {
+            for (uint i = tid; i < 1792; i += 256) {
                 uint limb = i / 256, b = i % 256, j = b % half_len, start = (b / half_len) * len;
                 uint lo = limb * 512 + start + j, hi = lo + half_len;
                 uint u = work[lo];
@@ -137,16 +137,24 @@ kernel void akita_onehot_limb_commit(
             metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup);
         }
         for (uint coeff = tid; coeff < 512; coeff += 256) {
-            long carry = 0; uint4 lo(0u);
-            for (uint limb = 0; limb < 8; limb++) {
+            long carry = 0; uint4 lo(0u); uint upper = 0;
+            for (uint limb = 0; limb < 7; limb++) {
                 uint residue = shoup_mul_canonical(work[limb * 512 + coeff], untwist[coeff], untwistq[coeff], modulus);
                 long centered = residue > modulus / 2 ? long(residue) - modulus : long(residue);
                 long v = centered + carry;
-                lo[limb / 2] |= uint(ushort(v)) << (16 * (limb % 2));
-                carry = v >> 16;
+                uint digit = uint(v) & 0x7ffffu;
+                uint bit = 19 * limb, word = bit / 32, shift = bit % 32;
+                lo[word] |= digit << shift;
+                if (shift > 13) {
+                    if (word < 3) lo[word + 1] |= digit >> (32 - shift);
+                    else upper = digit >> (32 - shift);
+                }
+                carry = v >> 19;
             }
+            // Seven 19-bit digits span 133 bits. Fold the upper five bits
+            // and signed carry using 2^128 = C in the field.
             F value{jolt::fp128_detail::fold2_canonicalize<C>(lo, 0)};
-            value = value + F::from_i64(carry * long(C));
+            value = value + F::from_i64((carry * 32 + long(upper)) * long(C));
             ulong index = (ulong(part) * p.rings + task[s]) * 512 + coeff;
             out[index] = p.direct_output && p.first_chunk != 0 ? out[index] + value : value;
         }
