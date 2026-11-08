@@ -66,19 +66,13 @@ impl DeviceK16Sources {
     }
 }
 
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "before each push len < the checked total; every source starts at or before the final len"
-)]
-fn stage_sources<I: OneHotIndex, T, const TRIM_ABSENT: bool>(
+fn stage_sources<I: OneHotIndex, T: Copy + Send, const TRIM_ABSENT: bool>(
     sources: &[OneHotSource<'_, I>],
-    encode: impl Fn(u32) -> T,
+    encode: impl Fn(u32) -> T + Sync,
 ) -> Result<(Vec<T>, Vec<SourceLayout>), AkitaMetalError> {
-    let total = checked::sum(sources.iter().map(|source| source.indices.len()))
+    checked::sum(sources.iter().map(|source| source.indices.len()))
         .ok_or_else(|| shape_error("one-hot chunk count overflows usize"))?;
-    let mut hot = Vec::new();
-    hot.try_reserve_exact(total)
-        .map_err(|_| shape_error(format!("cannot stage {total} one-hot chunks")))?;
+    let mut total = 0usize;
     let mut layouts = Vec::with_capacity(sources.len());
     for source in sources {
         let chunk_size = source.chunk_size;
@@ -87,49 +81,80 @@ fn stage_sources<I: OneHotIndex, T, const TRIM_ABSENT: bool>(
                 "one-hot chunk size {chunk_size} is not a power of two below 2^32"
             )));
         }
-        let fields = u32::try_from(source.num_vars)
-            .ok()
-            .and_then(|num_vars| 1usize.checked_shl(num_vars))
-            .ok_or_else(|| {
-                shape_error(format!(
-                    "2^{} one-hot entries overflow the host address space",
-                    source.num_vars
-                ))
-            })?;
-        let hot_offset = hot.len();
-        let mut last_present_end = hot_offset;
-        for index in source.indices {
-            hot.push(encode(match index {
-                None => NO_HOT,
-                // A chunk size below 2^32 keeps every valid index below
-                // NO_HOT.
-                Some(index) => {
-                    let index = u32::try_from(index.as_usize())
-                        .ok()
-                        .filter(|&index| (index as usize) < chunk_size)
-                        .ok_or_else(|| {
-                            shape_error(format!(
-                                "hot index {} is outside a chunk of {chunk_size}",
-                                index.as_usize()
-                            ))
-                        })?;
-                    if TRIM_ABSENT {
-                        last_present_end = hot.len() + 1;
-                    }
-                    index
-                }
-            }));
-        }
-        if TRIM_ABSENT {
-            hot.truncate(last_present_end);
-        }
+        let fields = checked::pow2(source.num_vars).ok_or_else(|| {
+            shape_error(format!(
+                "2^{} one-hot entries overflow the host address space",
+                source.num_vars
+            ))
+        })?;
+        // Only None entries may be omitted. In particular, Some(0) remains
+        // present, and a present index beyond the logical domain is validated.
+        let chunks = if TRIM_ABSENT {
+            source
+                .indices
+                .iter()
+                .rposition(Option::is_some)
+                .map_or(0, |last| {
+                    // An index into a slice is strictly smaller than its length.
+                    last.saturating_add(1)
+                })
+        } else {
+            source.indices.len()
+        };
         layouts.push(SourceLayout {
-            hot_offset,
-            chunks: hot.len() - hot_offset,
+            hot_offset: total,
+            chunks,
             fields,
             log_chunk: chunk_size.trailing_zeros(),
             num_vars: source.num_vars,
         });
+        total = total
+            .checked_add(chunks)
+            .ok_or_else(|| shape_error("one-hot chunk count overflows usize"))?;
     }
+    let mut hot = Vec::new();
+    hot.try_reserve_exact(total)
+        .map_err(|_| shape_error(format!("cannot stage {total} one-hot chunks")))?;
+    hot.resize(total, encode(NO_HOT));
+    let mut rest = hot.as_mut_slice();
+    let mut work = Vec::with_capacity(sources.len());
+    for (source, layout) in sources.iter().zip(&layouts) {
+        let (destination, remaining) = rest.split_at_mut(layout.chunks);
+        rest = remaining;
+        work.push((source, destination));
+    }
+    let fill = |(source, destination): (&OneHotSource<'_, I>, &mut [T])| {
+        for (index, out) in source.indices.iter().zip(destination) {
+            *out = encode(match index {
+                None => NO_HOT,
+                Some(index) => u32::try_from(index.as_usize())
+                    .ok()
+                    .filter(|&index| (index as usize) < source.chunk_size)
+                    .ok_or_else(|| {
+                        shape_error(format!(
+                            "hot index {} is outside a chunk of {}",
+                            index.as_usize(),
+                            source.chunk_size
+                        ))
+                    })?,
+            });
+        }
+        Ok::<_, AkitaMetalError>(())
+    };
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        if total >= 65_536 && work.len() > 1 {
+            work.into_par_iter().try_for_each(fill)?;
+        } else {
+            work.into_iter().try_for_each(fill)?;
+        }
+    }
+    #[cfg(not(feature = "parallel"))]
+    work.into_iter().try_for_each(fill)?;
     Ok((hot, layouts))
 }
+
+#[cfg(test)]
+#[path = "source_tests.rs"]
+mod tests;
