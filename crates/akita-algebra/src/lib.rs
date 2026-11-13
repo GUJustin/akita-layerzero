@@ -40,6 +40,13 @@ pub use ring::{
 };
 pub use split_eq::GruenSplitEq;
 
+/// Whether product sums should use delayed reduction. Exactness is required;
+/// a field can still prefer canonical multiplication when it is accelerated.
+#[inline]
+pub const fn delay_product_sums<E: jolt_field::Unreduced>() -> bool {
+    E::SUM_IS_EXACT && !E::PREFER_REDUCED_PRODUCTS
+}
+
 /// Fallible parallel fold-reduce over a range.
 ///
 /// The identity argument is a zero-argument factory, matching Rayon's

@@ -79,7 +79,7 @@ where
             return evaluate_weighted_scan(plan, setup_view, class.functional, &groups);
         }
     }
-    if E::SUM_IS_EXACT {
+    if akita_algebra::delay_product_sums::<E>() {
         evaluate_groups_reduced_with::<F, _, BASE_D, DelayedProductSum<E>>(
             plan,
             setup_view,

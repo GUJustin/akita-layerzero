@@ -288,9 +288,9 @@ impl<'a, E: Field> ScanGroup<'a, E> {
 /// [`WEIGHT_BLOCK_RINGS`] at a time, then adds `w(b)·⟨ring_b, pows⟩` for every
 /// nonzero-weight ring into one product sum.
 ///
-/// Where `SUM_IS_EXACT` holds, both accumulators delay reduction, and both
-/// stay inside the headroom it grants, so the delayed sums equal the reduced
-/// ones. A weight slot collects at most `groups × (2 + B slice terms)`
+/// When [`akita_algebra::delay_product_sums`] selects delayed reduction,
+/// both accumulators stay inside the exactness headroom, so the delayed sums
+/// equal the reduced ones. A weight slot collects at most `groups × (2 + B slice terms)`
 /// products (one D, one per B slice term, and one A for each group whose
 /// segment covers the ring), and a job sums at most [`SETUP_SCAN_JOB_RINGS`]
 /// products. The general reduced path's bounds are in
@@ -305,7 +305,7 @@ where
     F: Field,
     E: ExtField<F> + MulBaseUnreduced<F>,
 {
-    if E::SUM_IS_EXACT {
+    if akita_algebra::delay_product_sums::<E>() {
         evaluate_weighted_scan_with::<F, E, BASE_D, DelayedProductSum<E>>(
             plan, setup_view, pows, groups,
         )

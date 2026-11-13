@@ -40,11 +40,9 @@ pub(crate) fn accumulate_dense_round<E: Field + Unreduced>(
         return (E::zero(), E::zero());
     }
 
-    // Sum the wide products in `E::Product` only when the field has proven
-    // that delayed reduction is exact for these batch sizes; otherwise reduce
-    // each product immediately so the coefficients stay byte-identical to
-    // per-term `Mul` (the `SUM_IS_EXACT` contract).
-    let (constant, quadratic) = if E::SUM_IS_EXACT {
+    // Delay reduction only when it is exact and canonical multiplication is
+    // not preferred (for example, by an accelerated field-inline guest).
+    let (constant, quadratic) = if akita_algebra::delay_product_sums::<E>() {
         accumulate_dense_round_with::<E, DelayedDeg2<E>>(witness_evals, factor_evals)
     } else {
         accumulate_dense_round_with::<E, DirectDeg2<E>>(witness_evals, factor_evals)
@@ -111,7 +109,7 @@ pub(in crate::opaque::recursive::opening) fn fused_fold_group_head_and_accumulat
     debug_assert!(witness_evals.len().is_power_of_two());
     debug_assert!(witness_evals.len() >= 4);
 
-    if E::SUM_IS_EXACT {
+    if akita_algebra::delay_product_sums::<E>() {
         fused_fold_group_head_and_accumulate_with::<E, DelayedDeg2<E>>(
             witness_evals,
             factor_evals,
@@ -214,7 +212,7 @@ pub(in crate::opaque::recursive::opening) fn fused_fold_witness_and_accumulate<
     // accumulation respects `SUM_IS_EXACT`, matching
     // `accumulate_dense_round`. The factor is folded once by the owning group
     // before this function is called for each member witness.
-    if E::SUM_IS_EXACT {
+    if akita_algebra::delay_product_sums::<E>() {
         fused_fold_witness_and_accumulate_with::<E, DelayedDeg2<E>>(
             witness_evals,
             folded_factor,

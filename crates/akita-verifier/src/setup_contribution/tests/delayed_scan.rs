@@ -1,9 +1,8 @@
 //! The delayed-reduction scan against the row-by-row oracle.
 //!
-//! The other scan tests run over fp128, where `SUM_IS_EXACT` is false, so
-//! they only exercise `CanonicalProductSum`. Every fp32 and fp64 verification
-//! takes `DelayedProductSum` instead; this test covers that version's slot
-//! resets, block traversal, and nested slot and job sums.
+//! This extension field selects delayed product sums, exercising that path's
+//! slot resets, block traversal, and nested slot and job sums independently
+//! of the product-sum policy selected for fp128.
 
 use super::*;
 use jolt_field::{FpExt4, Prime32Offset99, Ring, Unreduced};

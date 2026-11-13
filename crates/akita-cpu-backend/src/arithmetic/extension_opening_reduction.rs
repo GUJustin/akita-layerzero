@@ -242,7 +242,7 @@ fn partials_out_contribution<F, E, S>(
     let in_len = split.in_len();
     let e_out = split.e_out[x_out];
     let row_base = x_out * in_len;
-    if E::SUM_IS_EXACT {
+    if akita_algebra::delay_product_sums::<E>() {
         let mut inner = vec![<E as Unreduced>::Product::zero(); width];
         for (x_in, &e_in) in split.e_in.iter().enumerate().take(in_len) {
             for (slot, coeff) in
@@ -279,7 +279,7 @@ where
     F: Field,
     E: MulBaseUnreduced<F>,
 {
-    if !E::SUM_IS_EXACT {
+    if !akita_algebra::delay_product_sums::<E>() {
         return eta_weights
             .iter()
             .enumerate()
